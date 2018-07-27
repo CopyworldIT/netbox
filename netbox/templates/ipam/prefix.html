@@ -131,5 +131,34 @@
         {% endif %}
         {% include 'panel_table.html' with table=parent_prefix_table heading='Parent Prefixes' panel_class='default' %}
 	</div>
+    <div class="col-md-7">
+        <div class="panel panel-default">
+            <div class="panel-heading">
+                <strong>Subnet Details</strong>
+            </div>
+            <table class="table table-hover panel-body">
+                <tr>
+                    <td>CIDR Notation</td>
+                    <td>{{ prefix.prefix }}</td>
+                </tr>
+                <tr>
+                    <td>Subnet mask</td>
+                    <td>{{ prefix.netmask }}</td>
+                </tr>
+                <tr>
+                    <td>Host mask</td>
+                    <td>{{ prefix.hostmask }}</td>
+                </tr>
+                <tr>
+                    <td>Network Addresses</td>
+                    <td>{{ prefix.network_address }} - {{ prefix.last_network_address }} ({{ prefix.hosts_count }})</td>
+                </tr>
+                <tr>
+                    <td>Usable Host Addresses</td>
+                    <td>{{ prefix.first_usable_address }} - {{ prefix.last_usable_address }} ({{ prefix.usable_hosts_count }})</td>
+                </tr>
+            </table>
+         </div>
+    </div>
 </div>
 {% endblock %}

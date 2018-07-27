@@ -441,6 +441,16 @@ class PrefixView(View):
             'vrf', 'site__region', 'tenant__group', 'vlan__group', 'role'
         ), pk=pk)
 
+        ipnet = netaddr.IPNetwork(prefix.prefix)
+        prefix.network_address = ipnet.network
+        prefix.hostmask = ipnet.hostmask
+        prefix.netmask = ipnet.netmask
+        prefix.last_network_address = str(netaddr.IPAddress(ipnet.last))
+        prefix.last_usable_address = str(netaddr.IPAddress(ipnet.last - 1))
+        prefix.first_usable_address = str(netaddr.IPAddress(ipnet.first + 1))
+        prefix.hosts_count = int(ipnet.hostmask + 1)
+        prefix.usable_hosts_count = int(ipnet.hostmask - 1)
+
         try:
             aggregate = Aggregate.objects.get(prefix__net_contains_or_equals=str(prefix.prefix))
         except Aggregate.DoesNotExist:
