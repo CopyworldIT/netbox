@@ -31,9 +31,6 @@ class VRFFilter(CustomFieldFilterSet, django_filters.FilterSet):
         to_field_name='slug',
         label='Tenant (slug)',
     )
-    tag = django_filters.CharFilter(
-        name='tags__slug',
-    )
 
     def search(self, queryset, name, value):
         if not value.strip():
@@ -72,9 +69,6 @@ class AggregateFilter(CustomFieldFilterSet, django_filters.FilterSet):
         queryset=RIR.objects.all(),
         to_field_name='slug',
         label='RIR (slug)',
-    )
-    tag = django_filters.CharFilter(
-        name='tags__slug',
     )
 
     class Meta:
@@ -173,9 +167,6 @@ class PrefixFilter(CustomFieldFilterSet, django_filters.FilterSet):
     status = django_filters.MultipleChoiceFilter(
         choices=PREFIX_STATUS_CHOICES,
         null_value=None
-    )
-    tag = django_filters.CharFilter(
-        name='tags__slug',
     )
 
     class Meta:
@@ -303,9 +294,6 @@ class IPAddressFilter(CustomFieldFilterSet, django_filters.FilterSet):
     role = django_filters.MultipleChoiceFilter(
         choices=IPADDRESS_ROLE_CHOICES
     )
-    tag = django_filters.CharFilter(
-        name='tags__slug',
-    )
 
     class Meta:
         model = IPAddress
@@ -422,9 +410,6 @@ class VLANFilter(CustomFieldFilterSet, django_filters.FilterSet):
         choices=VLAN_STATUS_CHOICES,
         null_value=None
     )
-    tag = django_filters.CharFilter(
-        name='tags__slug',
-    )
 
     class Meta:
         model = VLAN
@@ -442,10 +427,6 @@ class VLANFilter(CustomFieldFilterSet, django_filters.FilterSet):
 
 
 class ServiceFilter(django_filters.FilterSet):
-    q = django_filters.CharFilter(
-        method='search',
-        label='Search',
-    )
     device_id = django_filters.ModelMultipleChoiceFilter(
         queryset=Device.objects.all(),
         label='Device (ID)',
@@ -466,16 +447,7 @@ class ServiceFilter(django_filters.FilterSet):
         to_field_name='name',
         label='Virtual machine (name)',
     )
-    tag = django_filters.CharFilter(
-        name='tags__slug',
-    )
 
     class Meta:
         model = Service
         fields = ['name', 'protocol', 'port']
-
-    def search(self, queryset, name, value):
-        if not value.strip():
-            return queryset
-        qs_filter = Q(name__icontains=value) | Q(description__icontains=value)
-        return queryset.filter(qs_filter)

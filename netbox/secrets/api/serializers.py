@@ -2,12 +2,10 @@ from __future__ import unicode_literals
 
 from rest_framework import serializers
 from rest_framework.validators import UniqueTogetherValidator
-from taggit_serializer.serializers import TaggitSerializer, TagListSerializerField
 
 from dcim.api.serializers import NestedDeviceSerializer
-from extras.api.customfields import CustomFieldModelSerializer
 from secrets.models import Secret, SecretRole
-from utilities.api import ValidatedModelSerializer, WritableNestedSerializer
+from utilities.api import ValidatedModelSerializer
 
 
 #
@@ -21,7 +19,7 @@ class SecretRoleSerializer(ValidatedModelSerializer):
         fields = ['id', 'name', 'slug']
 
 
-class NestedSecretRoleSerializer(WritableNestedSerializer):
+class NestedSecretRoleSerializer(serializers.ModelSerializer):
     url = serializers.HyperlinkedIdentityField(view_name='secrets-api:secretrole-detail')
 
     class Meta:
@@ -33,17 +31,21 @@ class NestedSecretRoleSerializer(WritableNestedSerializer):
 # Secrets
 #
 
-class SecretSerializer(TaggitSerializer, CustomFieldModelSerializer):
+class SecretSerializer(serializers.ModelSerializer):
     device = NestedDeviceSerializer()
     role = NestedSecretRoleSerializer()
-    plaintext = serializers.CharField()
-    tags = TagListSerializerField(required=False)
 
     class Meta:
         model = Secret
-        fields = [
-            'id', 'device', 'role', 'name', 'plaintext', 'hash', 'tags', 'custom_fields', 'created', 'last_updated',
-        ]
+        fields = ['id', 'device', 'role', 'name', 'plaintext', 'hash', 'created', 'last_updated']
+
+
+class WritableSecretSerializer(serializers.ModelSerializer):
+    plaintext = serializers.CharField()
+
+    class Meta:
+        model = Secret
+        fields = ['id', 'device', 'role', 'name', 'plaintext', 'hash', 'created', 'last_updated']
         validators = []
 
     def validate(self, data):
@@ -62,6 +64,6 @@ class SecretSerializer(TaggitSerializer, CustomFieldModelSerializer):
             validator(data)
 
         # Enforce model validation
-        super(SecretSerializer, self).validate(data)
+        super(WritableSecretSerializer, self).validate(data)
 
         return data

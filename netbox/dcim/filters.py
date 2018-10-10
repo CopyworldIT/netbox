@@ -82,9 +82,6 @@ class SiteFilter(CustomFieldFilterSet, django_filters.FilterSet):
         to_field_name='slug',
         label='Tenant (slug)',
     )
-    tag = django_filters.CharFilter(
-        name='tags__slug',
-    )
 
     class Meta:
         model = Site
@@ -112,10 +109,6 @@ class SiteFilter(CustomFieldFilterSet, django_filters.FilterSet):
 
 
 class RackGroupFilter(django_filters.FilterSet):
-    q = django_filters.CharFilter(
-        method='search',
-        label='Search',
-    )
     site_id = django_filters.ModelMultipleChoiceFilter(
         queryset=Site.objects.all(),
         label='Site (ID)',
@@ -130,15 +123,6 @@ class RackGroupFilter(django_filters.FilterSet):
     class Meta:
         model = RackGroup
         fields = ['site_id', 'name', 'slug']
-
-    def search(self, queryset, name, value):
-        if not value.strip():
-            return queryset
-        qs_filter = (
-            Q(name__icontains=value) |
-            Q(slug__icontains=value)
-        )
-        return queryset.filter(qs_filter)
 
 
 class RackRoleFilter(django_filters.FilterSet):
@@ -194,9 +178,6 @@ class RackFilter(CustomFieldFilterSet, django_filters.FilterSet):
         queryset=RackRole.objects.all(),
         to_field_name='slug',
         label='Role (slug)',
-    )
-    tag = django_filters.CharFilter(
-        name='tags__slug',
     )
 
     class Meta:
@@ -304,9 +285,6 @@ class DeviceTypeFilter(CustomFieldFilterSet, django_filters.FilterSet):
         queryset=Manufacturer.objects.all(),
         to_field_name='slug',
         label='Manufacturer (slug)',
-    )
-    tag = django_filters.CharFilter(
-        name='tags__slug',
     )
 
     class Meta:
@@ -519,9 +497,6 @@ class DeviceFilter(CustomFieldFilterSet, django_filters.FilterSet):
         queryset=VirtualChassis.objects.all(),
         label='Virtual chassis (ID)',
     )
-    tag = django_filters.CharFilter(
-        name='tags__slug',
-    )
 
     class Meta:
         model = Device
@@ -534,7 +509,7 @@ class DeviceFilter(CustomFieldFilterSet, django_filters.FilterSet):
             Q(name__icontains=value) |
             Q(serial__icontains=value.strip()) |
             Q(inventory_items__serial__icontains=value.strip()) |
-            Q(asset_tag__icontains=value.strip()) |
+            Q(asset_tag=value.strip()) |
             Q(comments__icontains=value)
         ).distinct()
 
@@ -570,9 +545,6 @@ class DeviceComponentFilterSet(django_filters.FilterSet):
         queryset=Device.objects.all(),
         to_field_name='name',
         label='Device (name)',
-    )
-    tag = django_filters.CharFilter(
-        name='tags__slug',
     )
 
 
@@ -631,9 +603,6 @@ class InterfaceFilter(django_filters.FilterSet):
     mac_address = django_filters.CharFilter(
         method='_mac_address',
         label='MAC address',
-    )
-    tag = django_filters.CharFilter(
-        name='tags__slug',
     )
 
     class Meta:
@@ -740,9 +709,6 @@ class VirtualChassisFilter(django_filters.FilterSet):
         queryset=Tenant.objects.all(),
         to_field_name='slug',
         label='Tenant (slug)',
-    )
-    tag = django_filters.CharFilter(
-        name='tags__slug',
     )
 
     class Meta:

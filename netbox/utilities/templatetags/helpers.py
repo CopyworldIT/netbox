@@ -1,7 +1,7 @@
 from __future__ import unicode_literals
 
 import datetime
-import json
+import pytz
 
 from django import template
 from django.utils.safestring import mark_safe
@@ -45,14 +45,6 @@ def gfm(value):
     """
     html = markdown(value, extensions=['mdx_gfm'])
     return mark_safe(html)
-
-
-@register.filter()
-def render_json(value):
-    """
-    Render a dictionary as formatted JSON.
-    """
-    return json.dumps(value, indent=4, sort_keys=True)
 
 
 @register.filter()
@@ -167,15 +159,4 @@ def utilization_graph(utilization, warning_threshold=75, danger_threshold=90):
         'utilization': utilization,
         'warning_threshold': warning_threshold,
         'danger_threshold': danger_threshold,
-    }
-
-
-@register.inclusion_tag('utilities/templatetags/tag.html')
-def tag(tag, url_name=None):
-    """
-    Display a tag, optionally linked to a filtered list of objects.
-    """
-    return {
-        'tag': tag,
-        'url_name': url_name,
     }

@@ -1,10 +1,12 @@
 from __future__ import unicode_literals
 
-from netaddr import AddrFormatError, EUI, mac_unix_expanded
+from netaddr import EUI, mac_unix_expanded
 
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
+
+from .formfields import MACAddressFormField
 
 
 class ASNField(models.BigIntegerField):
@@ -33,7 +35,7 @@ class MACAddressField(models.Field):
             return value
         try:
             return EUI(value, version=48, dialect=mac_unix_expanded_uppercase)
-        except AddrFormatError as e:
+        except ValueError as e:
             raise ValidationError(e)
 
     def db_type(self, connection):
@@ -43,3 +45,11 @@ class MACAddressField(models.Field):
         if not value:
             return None
         return str(self.to_python(value))
+
+    def form_class(self):
+        return MACAddressFormField
+
+    def formfield(self, **kwargs):
+        defaults = {'form_class': self.form_class()}
+        defaults.update(kwargs)
+        return super(MACAddressField, self).formfield(**defaults)

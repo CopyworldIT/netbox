@@ -4,11 +4,9 @@ from Crypto.Cipher import PKCS1_OAEP
 from Crypto.PublicKey import RSA
 from django import forms
 from django.db.models import Count
-from taggit.forms import TagField
 
 from dcim.models import Device
-from extras.forms import AddRemoveTagsForm, CustomFieldBulkEditForm, CustomFieldFilterForm, CustomFieldForm
-from utilities.forms import BootstrapMixin, FilterChoiceField, FlexibleModelChoiceField, SlugField
+from utilities.forms import BootstrapMixin, BulkEditForm, FilterChoiceField, FlexibleModelChoiceField, SlugField
 from .models import Secret, SecretRole, UserKey
 
 
@@ -59,7 +57,7 @@ class SecretRoleCSVForm(forms.ModelForm):
 # Secrets
 #
 
-class SecretForm(BootstrapMixin, CustomFieldForm):
+class SecretForm(BootstrapMixin, forms.ModelForm):
     plaintext = forms.CharField(
         max_length=65535,
         required=False,
@@ -72,11 +70,10 @@ class SecretForm(BootstrapMixin, CustomFieldForm):
         label='Plaintext (verify)',
         widget=forms.PasswordInput()
     )
-    tags = TagField(required=False)
 
     class Meta:
         model = Secret
-        fields = ['role', 'name', 'plaintext', 'plaintext2', 'tags']
+        fields = ['role', 'name', 'plaintext', 'plaintext2']
 
     def __init__(self, *args, **kwargs):
 
@@ -129,7 +126,7 @@ class SecretCSVForm(forms.ModelForm):
         return s
 
 
-class SecretBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomFieldBulkEditForm):
+class SecretBulkEditForm(BootstrapMixin, BulkEditForm):
     pk = forms.ModelMultipleChoiceField(queryset=Secret.objects.all(), widget=forms.MultipleHiddenInput)
     role = forms.ModelChoiceField(queryset=SecretRole.objects.all(), required=False)
     name = forms.CharField(max_length=100, required=False)
@@ -138,8 +135,7 @@ class SecretBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomFieldBulkEditF
         nullable_fields = ['name']
 
 
-class SecretFilterForm(BootstrapMixin, CustomFieldFilterForm):
-    model = Secret
+class SecretFilterForm(BootstrapMixin, forms.Form):
     q = forms.CharField(required=False, label='Search')
     role = FilterChoiceField(
         queryset=SecretRole.objects.annotate(filter_count=Count('secrets')),
@@ -157,8 +153,7 @@ class UserKeyForm(BootstrapMixin, forms.ModelForm):
         model = UserKey
         fields = ['public_key']
         help_texts = {
-            'public_key': "Enter your public RSA key. Keep the private one with you; you'll need it for decryption. "
-                          "Please note that passphrase-protected keys are not supported.",
+            'public_key': "Enter your public RSA key. Keep the private one with you; you'll need it for decryption.",
         }
 
     def clean_public_key(self):

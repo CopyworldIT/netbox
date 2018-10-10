@@ -2,10 +2,9 @@ from __future__ import unicode_literals
 
 from django import forms
 from django.db.models import Count
-from taggit.forms import TagField
 
 from dcim.models import Site, Device, Interface, Rack
-from extras.forms import AddRemoveTagsForm, CustomFieldForm, CustomFieldBulkEditForm, CustomFieldFilterForm
+from extras.forms import CustomFieldForm, CustomFieldBulkEditForm, CustomFieldFilterForm
 from tenancy.forms import TenancyForm
 from tenancy.models import Tenant
 from utilities.forms import (
@@ -23,11 +22,10 @@ from .models import Circuit, CircuitTermination, CircuitType, Provider
 class ProviderForm(BootstrapMixin, CustomFieldForm):
     slug = SlugField()
     comments = CommentField()
-    tags = TagField(required=False)
 
     class Meta:
         model = Provider
-        fields = ['name', 'slug', 'asn', 'account', 'portal_url', 'noc_contact', 'admin_contact', 'comments', 'tags']
+        fields = ['name', 'slug', 'asn', 'account', 'portal_url', 'noc_contact', 'admin_contact', 'comments']
         widgets = {
             'noc_contact': SmallTextarea(attrs={'rows': 5}),
             'admin_contact': SmallTextarea(attrs={'rows': 5}),
@@ -55,7 +53,7 @@ class ProviderCSVForm(forms.ModelForm):
         }
 
 
-class ProviderBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomFieldBulkEditForm):
+class ProviderBulkEditForm(BootstrapMixin, CustomFieldBulkEditForm):
     pk = forms.ModelMultipleChoiceField(queryset=Provider.objects.all(), widget=forms.MultipleHiddenInput)
     asn = forms.IntegerField(required=False, label='ASN')
     account = forms.CharField(max_length=30, required=False, label='Account number')
@@ -104,13 +102,12 @@ class CircuitTypeCSVForm(forms.ModelForm):
 
 class CircuitForm(BootstrapMixin, TenancyForm, CustomFieldForm):
     comments = CommentField()
-    tags = TagField(required=False)
 
     class Meta:
         model = Circuit
         fields = [
             'cid', 'type', 'provider', 'status', 'install_date', 'commit_rate', 'description', 'tenant_group', 'tenant',
-            'comments', 'tags',
+            'comments',
         ]
         help_texts = {
             'cid': "Unique circuit ID",
@@ -158,7 +155,7 @@ class CircuitCSVForm(forms.ModelForm):
         ]
 
 
-class CircuitBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomFieldBulkEditForm):
+class CircuitBulkEditForm(BootstrapMixin, CustomFieldBulkEditForm):
     pk = forms.ModelMultipleChoiceField(queryset=Circuit.objects.all(), widget=forms.MultipleHiddenInput)
     type = forms.ModelChoiceField(queryset=CircuitType.objects.all(), required=False)
     provider = forms.ModelChoiceField(queryset=Provider.objects.all(), required=False)

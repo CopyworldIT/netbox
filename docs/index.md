@@ -1,5 +1,3 @@
-![NetBox](netbox_logo.png "NetBox logo")
-
 # What is NetBox?
 
 NetBox is an open source web application designed to help manage and document computer networks. Initially conceived by the network engineering team at [DigitalOcean](https://www.digitalocean.com/), NetBox was developed specifically to address the needs of network and infrastructure engineers. It encompasses the following aspects of network management:
@@ -12,7 +10,7 @@ NetBox is an open source web application designed to help manage and document co
 * **Data circuits** - Long-haul communications circuits and providers
 * **Secrets** - Encrypted storage of sensitive credentials
 
-# What NetBox Is Not
+# What NetBox Isn't
 
 While NetBox strives to cover many areas of network management, the scope of its feature set is necessarily limited. This ensures that development focuses on core functionality and that scope creep is reasonably contained. To that end, it might help to provide some examples of functionality that NetBox **does not** provide:
 
@@ -44,15 +42,13 @@ When given a choice between a relatively simple [80% solution](https://en.wikipe
 
 NetBox is built on the [Django](https://djangoproject.com/) Python framework and utilizes a [PostgreSQL](https://www.postgresql.org/) database. It runs as a WSGI service behind your choice of HTTP server.
 
-| Function           | Component         |
-|--------------------|-------------------|
-| HTTP service       | nginx or Apache   |
-| WSGI service       | gunicorn or uWSGI |
-| Application        | Django/Python     |
-| Database           | PostgreSQL 9.4+   |
-| Task queuing       | Redis/django-rq   |
-| Live device access | NAPALM            |
+| Function     | Component         |
+|--------------|-------------------|
+| HTTP Service | nginx or Apache   |
+| WSGI Service | gunicorn or uWSGI |
+| Application  | Django/Python     |
+| Database     | PostgreSQL 9.4+   |
 
 # Getting Started
 
-See the [installation guide](installation/index.md) for help getting NetBox up and running quickly.
+See the [installation guide](installation/postgresql.md) for help getting NetBox up and running quickly.

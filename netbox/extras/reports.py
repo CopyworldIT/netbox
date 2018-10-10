@@ -1,10 +1,9 @@
 from __future__ import unicode_literals
 
-from collections import OrderedDict
 import importlib
 import inspect
 import pkgutil
-import sys
+from collections import OrderedDict
 
 from django.conf import settings
 from django.utils import timezone
@@ -17,36 +16,19 @@ def is_report(obj):
     """
     Returns True if the given object is a Report.
     """
-    return obj in Report.__subclasses__()
+    if obj in Report.__subclasses__():
+        return True
+    return False
 
 
 def get_report(module_name, report_name):
     """
     Return a specific report from within a module.
     """
-    file_path = '{}/{}.py'.format(settings.REPORTS_ROOT, module_name)
-
-    # Python 3.5+
-    if sys.version_info >= (3, 5):
-        spec = importlib.util.spec_from_file_location(module_name, file_path)
-        module = importlib.util.module_from_spec(spec)
-        try:
-            spec.loader.exec_module(module)
-        except FileNotFoundError:
-            return None
-
-    # Python 2.7
-    else:
-        import imp
-        try:
-            module = imp.load_source(module_name, file_path)
-        except IOError:
-            return None
-
+    module = importlib.import_module('reports.{}'.format(module_name))
     report = getattr(module, report_name, None)
     if report is None:
         return None
-
     return report()
 
 
@@ -64,8 +46,8 @@ def get_reports():
 
     # Iterate through all modules within the reports path. These are the user-created files in which reports are
     # defined.
-    for importer, module_name, _ in pkgutil.iter_modules([settings.REPORTS_ROOT]):
-        module = importer.find_module(module_name).load_module(module_name)
+    for importer, module_name, is_pkg in pkgutil.walk_packages([settings.REPORTS_ROOT]):
+        module = importlib.import_module('reports.{}'.format(module_name))
         report_list = [cls() for _, cls in inspect.getmembers(module, is_report)]
         module_list.append((module_name, report_list))
 
@@ -122,7 +104,7 @@ class Report(object):
 
     @property
     def module(self):
-        return self.__module__
+        return self.__module__.rsplit('.', 1)[1]
 
     @property
     def name(self):
