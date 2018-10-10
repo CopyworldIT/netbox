@@ -7,9 +7,10 @@ from django.contrib.auth.models import User
 from django.contrib.postgres.forms.array import SimpleArrayField
 from django.db.models import Count, Q
 from mptt.forms import TreeNodeChoiceField
+from taggit.forms import TagField
 from timezone_field import TimeZoneFormField
 
-from extras.forms import CustomFieldForm, CustomFieldBulkEditForm, CustomFieldFilterForm
+from extras.forms import AddRemoveTagsForm, CustomFieldForm, CustomFieldBulkEditForm, CustomFieldFilterForm
 from ipam.models import IPAddress, VLAN, VLANGroup
 from tenancy.forms import TenancyForm
 from tenancy.models import Tenant
@@ -17,7 +18,7 @@ from utilities.forms import (
     AnnotatedMultipleChoiceField, APISelect, add_blank_choice, ArrayFieldSelectMultiple, BootstrapMixin, BulkEditForm,
     BulkEditNullBooleanSelect, ChainedFieldsMixin, ChainedModelChoiceField, CommentField, ComponentForm,
     ConfirmationForm, CSVChoiceField, ExpandableNameField, FilterChoiceField, FilterTreeNodeMultipleChoiceField,
-    FlexibleModelChoiceField, Livesearch, SelectWithDisabled, SelectWithPK, SmallTextarea, SlugField,
+    FlexibleModelChoiceField, JSONField, Livesearch, SelectWithDisabled, SelectWithPK, SmallTextarea, SlugField,
 )
 from virtualization.models import Cluster
 from .constants import (
@@ -26,7 +27,6 @@ from .constants import (
     RACK_TYPE_CHOICES, RACK_WIDTH_CHOICES, RACK_WIDTH_19IN, RACK_WIDTH_23IN, SITE_STATUS_CHOICES, SUBDEVICE_ROLE_CHILD,
     SUBDEVICE_ROLE_PARENT, SUBDEVICE_ROLE_CHOICES,
 )
-from .formfields import MACAddressFormField
 from .models import (
     DeviceBay, DeviceBayTemplate, ConsolePort, ConsolePortTemplate, ConsoleServerPort, ConsoleServerPortTemplate,
     Device, DeviceRole, DeviceType, Interface, InterfaceConnection, InterfaceTemplate, Manufacturer, InventoryItem,
@@ -108,12 +108,14 @@ class SiteForm(BootstrapMixin, TenancyForm, CustomFieldForm):
     region = TreeNodeChoiceField(queryset=Region.objects.all(), required=False)
     slug = SlugField()
     comments = CommentField()
+    tags = TagField(required=False)
 
     class Meta:
         model = Site
         fields = [
             'name', 'slug', 'status', 'region', 'tenant_group', 'tenant', 'facility', 'asn', 'time_zone', 'description',
-            'physical_address', 'shipping_address', 'contact_name', 'contact_phone', 'contact_email', 'comments',
+            'physical_address', 'shipping_address', 'latitude', 'longitude', 'contact_name', 'contact_phone',
+            'contact_email', 'comments', 'tags',
         ]
         widgets = {
             'physical_address': SmallTextarea(attrs={'rows': 3}),
@@ -126,7 +128,9 @@ class SiteForm(BootstrapMixin, TenancyForm, CustomFieldForm):
             'time_zone': "Local time zone",
             'description': "Short description (will appear in sites list)",
             'physical_address': "Physical location of the building (e.g. for GPS)",
-            'shipping_address': "If different from the physical address"
+            'shipping_address': "If different from the physical address",
+            'latitude': "Latitude in decimal format (xx.yyyyyy)",
+            'longitude': "Longitude in decimal format (xx.yyyyyy)"
         }
 
 
@@ -165,7 +169,7 @@ class SiteCSVForm(forms.ModelForm):
         }
 
 
-class SiteBulkEditForm(BootstrapMixin, CustomFieldBulkEditForm):
+class SiteBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomFieldBulkEditForm):
     pk = forms.ModelMultipleChoiceField(
         queryset=Site.objects.all(),
         widget=forms.MultipleHiddenInput
@@ -298,12 +302,13 @@ class RackForm(BootstrapMixin, TenancyForm, CustomFieldForm):
         )
     )
     comments = CommentField()
+    tags = TagField(required=False)
 
     class Meta:
         model = Rack
         fields = [
             'site', 'group', 'name', 'facility_id', 'tenant_group', 'tenant', 'role', 'serial', 'type', 'width',
-            'u_height', 'desc_units', 'comments',
+            'u_height', 'desc_units', 'comments', 'tags',
         ]
         help_texts = {
             'site': "The site at which the rack exists",
@@ -374,6 +379,8 @@ class RackCSVForm(forms.ModelForm):
 
         site = self.cleaned_data.get('site')
         group_name = self.cleaned_data.get('group_name')
+        name = self.cleaned_data.get('name')
+        facility_id = self.cleaned_data.get('facility_id')
 
         # Validate rack group
         if group_name:
@@ -382,8 +389,20 @@ class RackCSVForm(forms.ModelForm):
             except RackGroup.DoesNotExist:
                 raise forms.ValidationError("Rack group {} not found for site {}".format(group_name, site))
 
+            # Validate uniqueness of rack name within group
+            if Rack.objects.filter(group=self.instance.group, name=name).exists():
+                raise forms.ValidationError(
+                    "A rack named {} already exists within group {}".format(name, group_name)
+                )
 
-class RackBulkEditForm(BootstrapMixin, CustomFieldBulkEditForm):
+            # Validate uniqueness of facility ID within group
+            if facility_id and Rack.objects.filter(group=self.instance.group, facility_id=facility_id).exists():
+                raise forms.ValidationError(
+                    "A rack with the facility ID {} already exists within group {}".format(facility_id, group_name)
+                )
+
+
+class RackBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomFieldBulkEditForm):
     pk = forms.ModelMultipleChoiceField(queryset=Rack.objects.all(), widget=forms.MultipleHiddenInput)
     site = forms.ModelChoiceField(queryset=Site.objects.all(), required=False, label='Site')
     group = forms.ModelChoiceField(queryset=RackGroup.objects.all(), required=False, label='Group')
@@ -509,11 +528,14 @@ class ManufacturerCSVForm(forms.ModelForm):
 
 class DeviceTypeForm(BootstrapMixin, CustomFieldForm):
     slug = SlugField(slug_source='model')
+    tags = TagField(required=False)
 
     class Meta:
         model = DeviceType
-        fields = ['manufacturer', 'model', 'slug', 'part_number', 'u_height', 'is_full_depth', 'is_console_server',
-                  'is_pdu', 'is_network_device', 'subdevice_role', 'interface_ordering', 'comments']
+        fields = [
+            'manufacturer', 'model', 'slug', 'part_number', 'u_height', 'is_full_depth', 'is_console_server', 'is_pdu',
+            'is_network_device', 'subdevice_role', 'interface_ordering', 'comments', 'tags',
+        ]
         labels = {
             'interface_ordering': 'Order interfaces by',
         }
@@ -549,7 +571,7 @@ class DeviceTypeCSVForm(forms.ModelForm):
         }
 
 
-class DeviceTypeBulkEditForm(BootstrapMixin, CustomFieldBulkEditForm):
+class DeviceTypeBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomFieldBulkEditForm):
     pk = forms.ModelMultipleChoiceField(queryset=DeviceType.objects.all(), widget=forms.MultipleHiddenInput)
     manufacturer = forms.ModelChoiceField(queryset=Manufacturer.objects.all(), required=False)
     u_height = forms.IntegerField(min_value=1, required=False)
@@ -723,7 +745,10 @@ class PlatformForm(BootstrapMixin, forms.ModelForm):
 
     class Meta:
         model = Platform
-        fields = ['name', 'slug', 'manufacturer', 'napalm_driver', 'rpc_client']
+        fields = ['name', 'slug', 'manufacturer', 'napalm_driver', 'napalm_args', 'rpc_client']
+        widgets = {
+            'napalm_args': SmallTextarea(),
+        }
 
 
 class PlatformCSVForm(forms.ModelForm):
@@ -796,16 +821,20 @@ class DeviceForm(BootstrapMixin, TenancyForm, CustomFieldForm):
         )
     )
     comments = CommentField()
+    tags = TagField(required=False)
+    local_context_data = JSONField(required=False)
 
     class Meta:
         model = Device
         fields = [
-            'name', 'device_role', 'device_type', 'serial', 'asset_tag', 'site', 'rack', 'position', 'face', 'status',
-            'platform', 'primary_ip4', 'primary_ip6', 'tenant_group', 'tenant', 'comments',
+            'name', 'device_role', 'device_type', 'serial', 'asset_tag', 'site', 'rack', 'position', 'face',
+            'status', 'platform', 'primary_ip4', 'primary_ip6', 'tenant_group', 'tenant', 'comments', 'tags',
+            'local_context_data'
         ]
         help_texts = {
             'device_role': "The function this device serves",
             'serial': "Chassis serial number",
+            'local_context_data': "Local config context data overwrites all sources contexts in the final rendered config context"
         }
         widgets = {
             'face': forms.Select(attrs={'filter-for': 'position'}),
@@ -1063,7 +1092,7 @@ class ChildDeviceCSVForm(BaseDeviceCSVForm):
                 raise forms.ValidationError("Parent device/bay ({} {}) not found".format(parent, device_bay_name))
 
 
-class DeviceBulkEditForm(BootstrapMixin, CustomFieldBulkEditForm):
+class DeviceBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomFieldBulkEditForm):
     pk = forms.ModelMultipleChoiceField(queryset=Device.objects.all(), widget=forms.MultipleHiddenInput)
     device_type = forms.ModelChoiceField(queryset=DeviceType.objects.all(), required=False, label='Type')
     device_role = forms.ModelChoiceField(queryset=DeviceRole.objects.all(), required=False, label='Role')
@@ -1153,10 +1182,11 @@ class DeviceBulkAddInterfaceForm(DeviceBulkAddComponentForm):
 #
 
 class ConsolePortForm(BootstrapMixin, forms.ModelForm):
+    tags = TagField(required=False)
 
     class Meta:
         model = ConsolePort
-        fields = ['device', 'name']
+        fields = ['device', 'name', 'tags']
         widgets = {
             'device': forms.HiddenInput(),
         }
@@ -1164,6 +1194,7 @@ class ConsolePortForm(BootstrapMixin, forms.ModelForm):
 
 class ConsolePortCreateForm(ComponentForm):
     name_pattern = ExpandableNameField(label='Name')
+    tags = TagField(required=False)
 
 
 class ConsoleConnectionCSVForm(forms.ModelForm):
@@ -1322,10 +1353,11 @@ class ConsolePortConnectionForm(BootstrapMixin, ChainedFieldsMixin, forms.ModelF
 #
 
 class ConsoleServerPortForm(BootstrapMixin, forms.ModelForm):
+    tags = TagField(required=False)
 
     class Meta:
         model = ConsoleServerPort
-        fields = ['device', 'name']
+        fields = ['device', 'name', 'tags']
         widgets = {
             'device': forms.HiddenInput(),
         }
@@ -1333,6 +1365,7 @@ class ConsoleServerPortForm(BootstrapMixin, forms.ModelForm):
 
 class ConsoleServerPortCreateForm(ComponentForm):
     name_pattern = ExpandableNameField(label='Name')
+    tags = TagField(required=False)
 
 
 class ConsoleServerPortConnectionForm(BootstrapMixin, ChainedFieldsMixin, forms.Form):
@@ -1418,10 +1451,11 @@ class ConsoleServerPortBulkDisconnectForm(ConfirmationForm):
 #
 
 class PowerPortForm(BootstrapMixin, forms.ModelForm):
+    tags = TagField(required=False)
 
     class Meta:
         model = PowerPort
-        fields = ['device', 'name']
+        fields = ['device', 'name', 'tags']
         widgets = {
             'device': forms.HiddenInput(),
         }
@@ -1429,6 +1463,7 @@ class PowerPortForm(BootstrapMixin, forms.ModelForm):
 
 class PowerPortCreateForm(ComponentForm):
     name_pattern = ExpandableNameField(label='Name')
+    tags = TagField(required=False)
 
 
 class PowerConnectionCSVForm(forms.ModelForm):
@@ -1587,10 +1622,11 @@ class PowerPortConnectionForm(BootstrapMixin, ChainedFieldsMixin, forms.ModelFor
 #
 
 class PowerOutletForm(BootstrapMixin, forms.ModelForm):
+    tags = TagField(required=False)
 
     class Meta:
         model = PowerOutlet
-        fields = ['device', 'name']
+        fields = ['device', 'name', 'tags']
         widgets = {
             'device': forms.HiddenInput(),
         }
@@ -1598,6 +1634,7 @@ class PowerOutletForm(BootstrapMixin, forms.ModelForm):
 
 class PowerOutletCreateForm(ComponentForm):
     name_pattern = ExpandableNameField(label='Name')
+    tags = TagField(required=False)
 
 
 class PowerOutletConnectionForm(BootstrapMixin, ChainedFieldsMixin, forms.Form):
@@ -1683,12 +1720,13 @@ class PowerOutletBulkDisconnectForm(ConfirmationForm):
 #
 
 class InterfaceForm(BootstrapMixin, forms.ModelForm):
+    tags = TagField(required=False)
 
     class Meta:
         model = Interface
         fields = [
             'device', 'name', 'form_factor', 'enabled', 'lag', 'mac_address', 'mtu', 'mgmt_only', 'description',
-            'mode', 'untagged_vlan', 'tagged_vlans',
+            'mode', 'untagged_vlan', 'tagged_vlans', 'tags',
         ]
         widgets = {
             'device': forms.HiddenInput(),
@@ -1763,7 +1801,7 @@ class InterfaceAssignVLANsForm(BootstrapMixin, forms.ModelForm):
         # Compile VLAN choices
         vlan_choices = []
 
-        # Add global VLANs
+        # Add non-grouped global VLANs
         global_vlans = VLAN.objects.filter(site=None, group=None).exclude(pk__in=assigned_vlans)
         vlan_choices.append((
             'Global', [(vlan.pk, vlan) for vlan in global_vlans])
@@ -1776,16 +1814,15 @@ class InterfaceAssignVLANsForm(BootstrapMixin, forms.ModelForm):
                 (group.name, [(vlan.pk, vlan) for vlan in global_group_vlans])
             )
 
-        parent = self.instance.parent
-        if parent is not None:
+        site = getattr(self.instance.parent, 'site', None)
+        if site is not None:
 
-            # Add site VLANs
-            if parent.site:
-                site_vlans = VLAN.objects.filter(site=parent.site, group=None).exclude(pk__in=assigned_vlans)
-                vlan_choices.append((parent.site.name, [(vlan.pk, vlan) for vlan in site_vlans]))
+            # Add non-grouped site VLANs
+            site_vlans = VLAN.objects.filter(site=site, group=None).exclude(pk__in=assigned_vlans)
+            vlan_choices.append((site.name, [(vlan.pk, vlan) for vlan in site_vlans]))
 
             # Add grouped site VLANs
-            for group in VLANGroup.objects.filter(site=parent.site):
+            for group in VLANGroup.objects.filter(site=site):
                 site_group_vlans = VLAN.objects.filter(group=group).exclude(pk__in=assigned_vlans)
                 vlan_choices.append((
                     '{} / {}'.format(group.site.name, group.name),
@@ -1823,7 +1860,7 @@ class InterfaceCreateForm(ComponentForm, forms.Form):
     enabled = forms.BooleanField(required=False)
     lag = forms.ModelChoiceField(queryset=Interface.objects.all(), required=False, label='Parent LAG')
     mtu = forms.IntegerField(required=False, min_value=1, max_value=32767, label='MTU')
-    mac_address = MACAddressFormField(required=False, label='MAC Address')
+    mac_address = forms.CharField(required=False, label='MAC Address')
     mgmt_only = forms.BooleanField(
         required=False,
         label='OOB Management',
@@ -1831,6 +1868,7 @@ class InterfaceCreateForm(ComponentForm, forms.Form):
     )
     description = forms.CharField(max_length=100, required=False)
     mode = forms.ChoiceField(choices=add_blank_choice(IFACE_MODE_CHOICES), required=False)
+    tags = TagField(required=False)
 
     def __init__(self, *args, **kwargs):
 
@@ -1849,7 +1887,7 @@ class InterfaceCreateForm(ComponentForm, forms.Form):
             self.fields['lag'].queryset = Interface.objects.none()
 
 
-class InterfaceBulkEditForm(BootstrapMixin, BulkEditForm):
+class InterfaceBulkEditForm(BootstrapMixin, AddRemoveTagsForm, BulkEditForm):
     pk = forms.ModelMultipleChoiceField(queryset=Interface.objects.all(), widget=forms.MultipleHiddenInput)
     form_factor = forms.ChoiceField(choices=add_blank_choice(IFACE_FF_CHOICES), required=False)
     enabled = forms.NullBooleanField(required=False, widget=BulkEditNullBooleanSelect)
@@ -2056,10 +2094,11 @@ class InterfaceConnectionCSVForm(forms.ModelForm):
 #
 
 class DeviceBayForm(BootstrapMixin, forms.ModelForm):
+    tags = TagField(required=False)
 
     class Meta:
         model = DeviceBay
-        fields = ['device', 'name']
+        fields = ['device', 'name', 'tags']
         widgets = {
             'device': forms.HiddenInput(),
         }
@@ -2067,6 +2106,7 @@ class DeviceBayForm(BootstrapMixin, forms.ModelForm):
 
 class DeviceBayCreateForm(ComponentForm):
     name_pattern = ExpandableNameField(label='Name')
+    tags = TagField(required=False)
 
 
 class PopulateDeviceBayForm(BootstrapMixin, forms.Form):
@@ -2117,10 +2157,11 @@ class InterfaceConnectionFilterForm(BootstrapMixin, forms.Form):
 #
 
 class InventoryItemForm(BootstrapMixin, forms.ModelForm):
+    tags = TagField(required=False)
 
     class Meta:
         model = InventoryItem
-        fields = ['name', 'manufacturer', 'part_id', 'serial', 'asset_tag', 'description']
+        fields = ['name', 'manufacturer', 'part_id', 'serial', 'asset_tag', 'description', 'tags']
 
 
 class InventoryItemCSVForm(forms.ModelForm):
@@ -2176,10 +2217,11 @@ class DeviceSelectionForm(forms.Form):
 
 
 class VirtualChassisForm(BootstrapMixin, forms.ModelForm):
+    tags = TagField(required=False)
 
     class Meta:
         model = VirtualChassis
-        fields = ['master', 'domain']
+        fields = ['master', 'domain', 'tags']
         widgets = {
             'master': SelectWithPK,
         }

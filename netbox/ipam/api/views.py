@@ -3,8 +3,8 @@ from __future__ import unicode_literals
 from django.conf import settings
 from django.shortcuts import get_object_or_404
 from rest_framework import status
-from rest_framework.decorators import detail_route
-from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
 from extras.api.views import CustomFieldModelViewSet
@@ -33,9 +33,8 @@ class IPAMFieldChoicesViewSet(FieldChoicesViewSet):
 #
 
 class VRFViewSet(CustomFieldModelViewSet):
-    queryset = VRF.objects.select_related('tenant')
+    queryset = VRF.objects.select_related('tenant').prefetch_related('tags')
     serializer_class = serializers.VRFSerializer
-    write_serializer_class = serializers.WritableVRFSerializer
     filter_class = filters.VRFFilter
 
 
@@ -54,9 +53,8 @@ class RIRViewSet(ModelViewSet):
 #
 
 class AggregateViewSet(CustomFieldModelViewSet):
-    queryset = Aggregate.objects.select_related('rir')
+    queryset = Aggregate.objects.select_related('rir').prefetch_related('tags')
     serializer_class = serializers.AggregateSerializer
-    write_serializer_class = serializers.WritableAggregateSerializer
     filter_class = filters.AggregateFilter
 
 
@@ -75,12 +73,11 @@ class RoleViewSet(ModelViewSet):
 #
 
 class PrefixViewSet(CustomFieldModelViewSet):
-    queryset = Prefix.objects.select_related('site', 'vrf__tenant', 'tenant', 'vlan', 'role')
+    queryset = Prefix.objects.select_related('site', 'vrf__tenant', 'tenant', 'vlan', 'role').prefetch_related('tags')
     serializer_class = serializers.PrefixSerializer
-    write_serializer_class = serializers.WritablePrefixSerializer
     filter_class = filters.PrefixFilter
 
-    @detail_route(url_path='available-prefixes', methods=['get', 'post'])
+    @action(detail=True, url_path='available-prefixes', methods=['get', 'post'])
     def available_prefixes(self, request, pk=None):
         """
         A convenience method for returning available child prefixes within a parent.
@@ -143,10 +140,11 @@ class PrefixViewSet(CustomFieldModelViewSet):
                 available_prefixes.remove(allocated_prefix)
 
             # Initialize the serializer with a list or a single object depending on what was requested
+            context = {'request': request}
             if isinstance(request.data, list):
-                serializer = serializers.WritablePrefixSerializer(data=requested_prefixes, many=True)
+                serializer = serializers.PrefixSerializer(data=requested_prefixes, many=True, context=context)
             else:
-                serializer = serializers.WritablePrefixSerializer(data=requested_prefixes[0])
+                serializer = serializers.PrefixSerializer(data=requested_prefixes[0], context=context)
 
             # Create the new Prefix(es)
             if serializer.is_valid():
@@ -164,7 +162,7 @@ class PrefixViewSet(CustomFieldModelViewSet):
 
             return Response(serializer.data)
 
-    @detail_route(url_path='available-ips', methods=['get', 'post'])
+    @action(detail=True, url_path='available-ips', methods=['get', 'post'])
     def available_ips(self, request, pk=None):
         """
         A convenience method for returning available IP addresses within a prefix. By default, the number of IPs
@@ -196,15 +194,17 @@ class PrefixViewSet(CustomFieldModelViewSet):
 
             # Assign addresses from the list of available IPs and copy VRF assignment from the parent prefix
             available_ips = iter(available_ips)
+            prefix_length = prefix.prefix.prefixlen
             for requested_ip in requested_ips:
-                requested_ip['address'] = next(available_ips)
+                requested_ip['address'] = '{}/{}'.format(next(available_ips), prefix_length)
                 requested_ip['vrf'] = prefix.vrf.pk if prefix.vrf else None
 
             # Initialize the serializer with a list or a single object depending on what was requested
+            context = {'request': request}
             if isinstance(request.data, list):
-                serializer = serializers.WritableIPAddressSerializer(data=requested_ips, many=True)
+                serializer = serializers.IPAddressSerializer(data=requested_ips, many=True, context=context)
             else:
-                serializer = serializers.WritableIPAddressSerializer(data=requested_ips[0])
+                serializer = serializers.IPAddressSerializer(data=requested_ips[0], context=context)
 
             # Create the new IP address(es)
             if serializer.is_valid():
@@ -245,10 +245,9 @@ class IPAddressViewSet(CustomFieldModelViewSet):
     queryset = IPAddress.objects.select_related(
         'vrf__tenant', 'tenant', 'nat_inside', 'interface__device__device_type', 'interface__virtual_machine'
     ).prefetch_related(
-        'nat_outside'
+        'nat_outside', 'tags',
     )
     serializer_class = serializers.IPAddressSerializer
-    write_serializer_class = serializers.WritableIPAddressSerializer
     filter_class = filters.IPAddressFilter
 
 
@@ -259,7 +258,6 @@ class IPAddressViewSet(CustomFieldModelViewSet):
 class VLANGroupViewSet(ModelViewSet):
     queryset = VLANGroup.objects.select_related('site')
     serializer_class = serializers.VLANGroupSerializer
-    write_serializer_class = serializers.WritableVLANGroupSerializer
     filter_class = filters.VLANGroupFilter
 
 
@@ -268,9 +266,8 @@ class VLANGroupViewSet(ModelViewSet):
 #
 
 class VLANViewSet(CustomFieldModelViewSet):
-    queryset = VLAN.objects.select_related('site', 'group', 'tenant', 'role')
+    queryset = VLAN.objects.select_related('site', 'group', 'tenant', 'role').prefetch_related('tags')
     serializer_class = serializers.VLANSerializer
-    write_serializer_class = serializers.WritableVLANSerializer
     filter_class = filters.VLANFilter
 
 
@@ -279,7 +276,6 @@ class VLANViewSet(CustomFieldModelViewSet):
 #
 
 class ServiceViewSet(ModelViewSet):
-    queryset = Service.objects.select_related('device')
+    queryset = Service.objects.select_related('device').prefetch_related('tags')
     serializer_class = serializers.ServiceSerializer
-    write_serializer_class = serializers.WritableServiceSerializer
     filter_class = filters.ServiceFilter

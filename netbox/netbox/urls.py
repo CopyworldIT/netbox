@@ -2,13 +2,13 @@ from __future__ import unicode_literals
 
 from django.conf import settings
 from django.conf.urls import include, url
-from django.contrib import admin
 from django.views.static import serve
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
 
 from netbox.views import APIRootView, HomeView, SearchView
 from users.views import LoginView, LogoutView
+from .admin import admin_site
 
 schema_view = get_schema_view(
     openapi.Info(
@@ -60,9 +60,14 @@ _patterns = [
     url(r'^media/(?P<path>.*)$', serve, {'document_root': settings.MEDIA_ROOT}),
 
     # Admin
-    url(r'^admin/', admin.site.urls),
+    url(r'^admin/', admin_site.urls),
 
 ]
+
+if settings.WEBHOOKS_ENABLED:
+    _patterns += [
+        url(r'^admin/webhook-backend-status/', include('django_rq.urls')),
+    ]
 
 if settings.DEBUG:
     import debug_toolbar
@@ -74,3 +79,5 @@ if settings.DEBUG:
 urlpatterns = [
     url(r'^{}'.format(settings.BASE_PATH), include(_patterns))
 ]
+
+handler500 = 'utilities.views.server_error'
