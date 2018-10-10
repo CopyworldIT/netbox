@@ -6,11 +6,10 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.urls import reverse
 from django.utils.encoding import python_2_unicode_compatible
-from taggit.managers import TaggableManager
 
 from dcim.models import Device
-from extras.models import ConfigContextModel, CustomFieldModel
-from utilities.models import ChangeLoggedModel
+from extras.models import CustomFieldModel, CustomFieldValue
+from utilities.models import CreatedUpdatedModel
 from .constants import DEVICE_STATUS_ACTIVE, VM_STATUS_CHOICES, VM_STATUS_CLASSES
 
 
@@ -19,7 +18,7 @@ from .constants import DEVICE_STATUS_ACTIVE, VM_STATUS_CHOICES, VM_STATUS_CLASSE
 #
 
 @python_2_unicode_compatible
-class ClusterType(ChangeLoggedModel):
+class ClusterType(models.Model):
     """
     A type of Cluster.
     """
@@ -54,7 +53,7 @@ class ClusterType(ChangeLoggedModel):
 #
 
 @python_2_unicode_compatible
-class ClusterGroup(ChangeLoggedModel):
+class ClusterGroup(models.Model):
     """
     An organizational group of Clusters.
     """
@@ -89,7 +88,7 @@ class ClusterGroup(ChangeLoggedModel):
 #
 
 @python_2_unicode_compatible
-class Cluster(ChangeLoggedModel, CustomFieldModel):
+class Cluster(CreatedUpdatedModel, CustomFieldModel):
     """
     A cluster of VirtualMachines. Each Cluster may optionally be associated with one or more Devices.
     """
@@ -120,12 +119,10 @@ class Cluster(ChangeLoggedModel, CustomFieldModel):
         blank=True
     )
     custom_field_values = GenericRelation(
-        to='extras.CustomFieldValue',
+        to=CustomFieldValue,
         content_type_field='obj_type',
         object_id_field='obj_id'
     )
-
-    tags = TaggableManager()
 
     csv_headers = ['name', 'type', 'group', 'site', 'comments']
 
@@ -165,12 +162,12 @@ class Cluster(ChangeLoggedModel, CustomFieldModel):
 #
 
 @python_2_unicode_compatible
-class VirtualMachine(ChangeLoggedModel, ConfigContextModel, CustomFieldModel):
+class VirtualMachine(CreatedUpdatedModel, CustomFieldModel):
     """
     A virtual machine which runs inside a Cluster.
     """
     cluster = models.ForeignKey(
-        to='virtualization.Cluster',
+        to=Cluster,
         on_delete=models.PROTECT,
         related_name='virtual_machines'
     )
@@ -199,9 +196,9 @@ class VirtualMachine(ChangeLoggedModel, ConfigContextModel, CustomFieldModel):
     )
     role = models.ForeignKey(
         to='dcim.DeviceRole',
+        limit_choices_to={'vm_role': True},
         on_delete=models.PROTECT,
         related_name='virtual_machines',
-        limit_choices_to={'vm_role': True},
         blank=True,
         null=True
     )
@@ -240,12 +237,10 @@ class VirtualMachine(ChangeLoggedModel, ConfigContextModel, CustomFieldModel):
         blank=True
     )
     custom_field_values = GenericRelation(
-        to='extras.CustomFieldValue',
+        to=CustomFieldValue,
         content_type_field='obj_type',
         object_id_field='obj_id'
     )
-
-    tags = TaggableManager()
 
     csv_headers = [
         'name', 'status', 'role', 'cluster', 'tenant', 'platform', 'vcpus', 'memory', 'disk', 'comments',
@@ -259,22 +254,6 @@ class VirtualMachine(ChangeLoggedModel, ConfigContextModel, CustomFieldModel):
 
     def get_absolute_url(self):
         return reverse('virtualization:virtualmachine', args=[self.pk])
-
-    def clean(self):
-
-        # Validate primary IP addresses
-        interfaces = self.interfaces.all()
-        for field in ['primary_ip4', 'primary_ip6']:
-            ip = getattr(self, field)
-            if ip is not None:
-                if ip.interface in interfaces:
-                    pass
-                elif self.primary_ip4.nat_inside is not None and self.primary_ip4.nat_inside.interface in interfaces:
-                    pass
-                else:
-                    raise ValidationError({
-                        field: "The specified IP address ({}) is not assigned to this VM.".format(ip),
-                    })
 
     def to_csv(self):
         return (

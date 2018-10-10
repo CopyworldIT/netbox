@@ -3,12 +3,12 @@ from __future__ import unicode_literals
 from collections import OrderedDict
 
 from django.conf import settings
-from django.http import HttpResponseForbidden
+from django.http import HttpResponseBadRequest, HttpResponseForbidden
 from django.shortcuts import get_object_or_404
 from drf_yasg import openapi
 from drf_yasg.openapi import Parameter
 from drf_yasg.utils import swagger_auto_schema
-from rest_framework.decorators import action
+from rest_framework.decorators import detail_route
 from rest_framework.mixins import ListModelMixin
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet, ViewSet
@@ -52,6 +52,7 @@ class DCIMFieldChoicesViewSet(FieldChoicesViewSet):
 class RegionViewSet(ModelViewSet):
     queryset = Region.objects.all()
     serializer_class = serializers.RegionSerializer
+    write_serializer_class = serializers.WritableRegionSerializer
     filter_class = filters.RegionFilter
 
 
@@ -60,11 +61,12 @@ class RegionViewSet(ModelViewSet):
 #
 
 class SiteViewSet(CustomFieldModelViewSet):
-    queryset = Site.objects.select_related('region', 'tenant').prefetch_related('tags')
+    queryset = Site.objects.select_related('region', 'tenant')
     serializer_class = serializers.SiteSerializer
+    write_serializer_class = serializers.WritableSiteSerializer
     filter_class = filters.SiteFilter
 
-    @action(detail=True)
+    @detail_route()
     def graphs(self, request, pk=None):
         """
         A convenience method for rendering graphs for a particular site.
@@ -82,6 +84,7 @@ class SiteViewSet(CustomFieldModelViewSet):
 class RackGroupViewSet(ModelViewSet):
     queryset = RackGroup.objects.select_related('site')
     serializer_class = serializers.RackGroupSerializer
+    write_serializer_class = serializers.WritableRackGroupSerializer
     filter_class = filters.RackGroupFilter
 
 
@@ -100,11 +103,12 @@ class RackRoleViewSet(ModelViewSet):
 #
 
 class RackViewSet(CustomFieldModelViewSet):
-    queryset = Rack.objects.select_related('site', 'group__site', 'tenant').prefetch_related('tags')
+    queryset = Rack.objects.select_related('site', 'group__site', 'tenant')
     serializer_class = serializers.RackSerializer
+    write_serializer_class = serializers.WritableRackSerializer
     filter_class = filters.RackFilter
 
-    @action(detail=True)
+    @detail_route()
     def units(self, request, pk=None):
         """
         List rack units (by rack)
@@ -132,6 +136,7 @@ class RackViewSet(CustomFieldModelViewSet):
 class RackReservationViewSet(ModelViewSet):
     queryset = RackReservation.objects.select_related('rack', 'user', 'tenant')
     serializer_class = serializers.RackReservationSerializer
+    write_serializer_class = serializers.WritableRackReservationSerializer
     filter_class = filters.RackReservationFilter
 
     # Assign user from request
@@ -154,8 +159,9 @@ class ManufacturerViewSet(ModelViewSet):
 #
 
 class DeviceTypeViewSet(CustomFieldModelViewSet):
-    queryset = DeviceType.objects.select_related('manufacturer').prefetch_related('tags')
+    queryset = DeviceType.objects.select_related('manufacturer')
     serializer_class = serializers.DeviceTypeSerializer
+    write_serializer_class = serializers.WritableDeviceTypeSerializer
     filter_class = filters.DeviceTypeFilter
 
 
@@ -166,36 +172,42 @@ class DeviceTypeViewSet(CustomFieldModelViewSet):
 class ConsolePortTemplateViewSet(ModelViewSet):
     queryset = ConsolePortTemplate.objects.select_related('device_type__manufacturer')
     serializer_class = serializers.ConsolePortTemplateSerializer
+    write_serializer_class = serializers.WritableConsolePortTemplateSerializer
     filter_class = filters.ConsolePortTemplateFilter
 
 
 class ConsoleServerPortTemplateViewSet(ModelViewSet):
     queryset = ConsoleServerPortTemplate.objects.select_related('device_type__manufacturer')
     serializer_class = serializers.ConsoleServerPortTemplateSerializer
+    write_serializer_class = serializers.WritableConsoleServerPortTemplateSerializer
     filter_class = filters.ConsoleServerPortTemplateFilter
 
 
 class PowerPortTemplateViewSet(ModelViewSet):
     queryset = PowerPortTemplate.objects.select_related('device_type__manufacturer')
     serializer_class = serializers.PowerPortTemplateSerializer
+    write_serializer_class = serializers.WritablePowerPortTemplateSerializer
     filter_class = filters.PowerPortTemplateFilter
 
 
 class PowerOutletTemplateViewSet(ModelViewSet):
     queryset = PowerOutletTemplate.objects.select_related('device_type__manufacturer')
     serializer_class = serializers.PowerOutletTemplateSerializer
+    write_serializer_class = serializers.WritablePowerOutletTemplateSerializer
     filter_class = filters.PowerOutletTemplateFilter
 
 
 class InterfaceTemplateViewSet(ModelViewSet):
     queryset = InterfaceTemplate.objects.select_related('device_type__manufacturer')
     serializer_class = serializers.InterfaceTemplateSerializer
+    write_serializer_class = serializers.WritableInterfaceTemplateSerializer
     filter_class = filters.InterfaceTemplateFilter
 
 
 class DeviceBayTemplateViewSet(ModelViewSet):
     queryset = DeviceBayTemplate.objects.select_related('device_type__manufacturer')
     serializer_class = serializers.DeviceBayTemplateSerializer
+    write_serializer_class = serializers.WritableDeviceBayTemplateSerializer
     filter_class = filters.DeviceBayTemplateFilter
 
 
@@ -216,6 +228,7 @@ class DeviceRoleViewSet(ModelViewSet):
 class PlatformViewSet(ModelViewSet):
     queryset = Platform.objects.all()
     serializer_class = serializers.PlatformSerializer
+    write_serializer_class = serializers.WritablePlatformSerializer
     filter_class = filters.PlatformFilter
 
 
@@ -228,24 +241,13 @@ class DeviceViewSet(CustomFieldModelViewSet):
         'device_type__manufacturer', 'device_role', 'tenant', 'platform', 'site', 'rack', 'parent_bay',
         'virtual_chassis__master',
     ).prefetch_related(
-        'primary_ip4__nat_outside', 'primary_ip6__nat_outside', 'tags',
+        'primary_ip4__nat_outside', 'primary_ip6__nat_outside',
     )
+    serializer_class = serializers.DeviceSerializer
+    write_serializer_class = serializers.WritableDeviceSerializer
     filter_class = filters.DeviceFilter
 
-    def get_serializer_class(self):
-        """
-        Include rendered config context when retrieving a single Device.
-        """
-        if self.action == 'retrieve':
-            return serializers.DeviceWithConfigContextSerializer
-
-        request = self.get_serializer_context()['request']
-        if request.query_params.get('brief', False):
-            return serializers.NestedDeviceSerializer
-
-        return serializers.DeviceSerializer
-
-    @action(detail=True, url_path='napalm')
+    @detail_route(url_path='napalm')
     def napalm(self, request, pk):
         """
         Execute a NAPALM method on a Device
@@ -265,7 +267,7 @@ class DeviceViewSet(CustomFieldModelViewSet):
             import napalm
         except ImportError:
             raise ServiceUnavailable("NAPALM is not installed. Please see the documentation for instructions.")
-        from napalm.base.exceptions import ModuleImportError
+        from napalm.base.exceptions import ConnectAuthError, ModuleImportError
 
         # Validate the configured driver
         try:
@@ -279,39 +281,33 @@ class DeviceViewSet(CustomFieldModelViewSet):
         if not request.user.has_perm('dcim.napalm_read'):
             return HttpResponseForbidden()
 
-        # Connect to the device
+        # Validate requested NAPALM methods
         napalm_methods = request.GET.getlist('method')
+        for method in napalm_methods:
+            if not hasattr(driver, method):
+                return HttpResponseBadRequest("Unknown NAPALM method: {}".format(method))
+            elif not method.startswith('get_'):
+                return HttpResponseBadRequest("Unsupported NAPALM method: {}".format(method))
+
+        # Connect to the device and execute the requested methods
+        # TODO: Improve error handling
         response = OrderedDict([(m, None) for m in napalm_methods])
         ip_address = str(device.primary_ip.address.ip)
-        optional_args = settings.NAPALM_ARGS.copy()
-        if device.platform.napalm_args is not None:
-            optional_args.update(device.platform.napalm_args)
         d = driver(
             hostname=ip_address,
             username=settings.NAPALM_USERNAME,
             password=settings.NAPALM_PASSWORD,
             timeout=settings.NAPALM_TIMEOUT,
-            optional_args=optional_args
+            optional_args=settings.NAPALM_ARGS
         )
         try:
             d.open()
+            for method in napalm_methods:
+                response[method] = getattr(d, method)()
         except Exception as e:
             raise ServiceUnavailable("Error connecting to the device at {}: {}".format(ip_address, e))
 
-        # Validate and execute each specified NAPALM method
-        for method in napalm_methods:
-            if not hasattr(driver, method):
-                response[method] = {'error': 'Unknown NAPALM method'}
-                continue
-            if not method.startswith('get_'):
-                response[method] = {'error': 'Only get_* NAPALM methods are supported'}
-                continue
-            try:
-                response[method] = getattr(d, method)()
-            except NotImplementedError:
-                response[method] = {'error': 'Method not implemented for NAPALM driver {}'.format(driver)}
         d.close()
-
         return Response(response)
 
 
@@ -320,35 +316,40 @@ class DeviceViewSet(CustomFieldModelViewSet):
 #
 
 class ConsolePortViewSet(ModelViewSet):
-    queryset = ConsolePort.objects.select_related('device', 'cs_port__device').prefetch_related('tags')
+    queryset = ConsolePort.objects.select_related('device', 'cs_port__device')
     serializer_class = serializers.ConsolePortSerializer
+    write_serializer_class = serializers.WritableConsolePortSerializer
     filter_class = filters.ConsolePortFilter
 
 
 class ConsoleServerPortViewSet(ModelViewSet):
-    queryset = ConsoleServerPort.objects.select_related('device', 'connected_console__device').prefetch_related('tags')
+    queryset = ConsoleServerPort.objects.select_related('device', 'connected_console__device')
     serializer_class = serializers.ConsoleServerPortSerializer
+    write_serializer_class = serializers.WritableConsoleServerPortSerializer
     filter_class = filters.ConsoleServerPortFilter
 
 
 class PowerPortViewSet(ModelViewSet):
-    queryset = PowerPort.objects.select_related('device', 'power_outlet__device').prefetch_related('tags')
+    queryset = PowerPort.objects.select_related('device', 'power_outlet__device')
     serializer_class = serializers.PowerPortSerializer
+    write_serializer_class = serializers.WritablePowerPortSerializer
     filter_class = filters.PowerPortFilter
 
 
 class PowerOutletViewSet(ModelViewSet):
-    queryset = PowerOutlet.objects.select_related('device', 'connected_port__device').prefetch_related('tags')
+    queryset = PowerOutlet.objects.select_related('device', 'connected_port__device')
     serializer_class = serializers.PowerOutletSerializer
+    write_serializer_class = serializers.WritablePowerOutletSerializer
     filter_class = filters.PowerOutletFilter
 
 
 class InterfaceViewSet(ModelViewSet):
-    queryset = Interface.objects.select_related('device').prefetch_related('tags')
+    queryset = Interface.objects.select_related('device')
     serializer_class = serializers.InterfaceSerializer
+    write_serializer_class = serializers.WritableInterfaceSerializer
     filter_class = filters.InterfaceFilter
 
-    @action(detail=True)
+    @detail_route()
     def graphs(self, request, pk=None):
         """
         A convenience method for rendering graphs for a particular interface.
@@ -360,14 +361,16 @@ class InterfaceViewSet(ModelViewSet):
 
 
 class DeviceBayViewSet(ModelViewSet):
-    queryset = DeviceBay.objects.select_related('installed_device').prefetch_related('tags')
+    queryset = DeviceBay.objects.select_related('installed_device')
     serializer_class = serializers.DeviceBaySerializer
+    write_serializer_class = serializers.WritableDeviceBaySerializer
     filter_class = filters.DeviceBayFilter
 
 
 class InventoryItemViewSet(ModelViewSet):
-    queryset = InventoryItem.objects.select_related('device', 'manufacturer').prefetch_related('tags')
+    queryset = InventoryItem.objects.select_related('device', 'manufacturer')
     serializer_class = serializers.InventoryItemSerializer
+    write_serializer_class = serializers.WritableInventoryItemSerializer
     filter_class = filters.InventoryItemFilter
 
 
@@ -390,6 +393,7 @@ class PowerConnectionViewSet(ListModelMixin, GenericViewSet):
 class InterfaceConnectionViewSet(ModelViewSet):
     queryset = InterfaceConnection.objects.select_related('interface_a__device', 'interface_b__device')
     serializer_class = serializers.InterfaceConnectionSerializer
+    write_serializer_class = serializers.WritableInterfaceConnectionSerializer
     filter_class = filters.InterfaceConnectionFilter
 
 
@@ -398,8 +402,9 @@ class InterfaceConnectionViewSet(ModelViewSet):
 #
 
 class VirtualChassisViewSet(ModelViewSet):
-    queryset = VirtualChassis.objects.prefetch_related('tags')
+    queryset = VirtualChassis.objects.all()
     serializer_class = serializers.VirtualChassisSerializer
+    write_serializer_class = serializers.WritableVirtualChassisSerializer
 
 
 #
