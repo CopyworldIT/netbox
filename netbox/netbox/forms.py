@@ -1,5 +1,3 @@
-from __future__ import unicode_literals
-
 from django import forms
 
 from utilities.forms import BootstrapMixin
@@ -13,9 +11,11 @@ OBJ_TYPE_CHOICES = (
     ('DCIM', (
         ('site', 'Sites'),
         ('rack', 'Racks'),
+        ('rackgroup', 'Rack Groups'),
         ('devicetype', 'Device types'),
         ('device', 'Devices'),
         ('virtualchassis', 'Virtual Chassis'),
+        ('cable', 'Cables'),
     )),
     ('IPAM', (
         ('vrf', 'VRFs'),

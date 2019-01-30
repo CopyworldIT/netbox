@@ -7,6 +7,13 @@ import warnings
 from django.contrib.messages import constants as messages
 from django.core.exceptions import ImproperlyConfigured
 
+# Django 2.1 requires Python 3.5+
+if sys.version_info < (3, 5):
+    raise RuntimeError(
+        "NetBox requires Python 3.5 or higher (current: Python {})".format(sys.version.split()[0])
+    )
+
+# Check for configuration file
 try:
     from netbox import configuration
 except ImportError:
@@ -14,15 +21,8 @@ except ImportError:
         "Configuration file is not present. Please define netbox/netbox/configuration.py per the documentation."
     )
 
-# Raise a deprecation warning for Python 2.x
-if sys.version_info[0] < 3:
-    warnings.warn(
-        "Support for Python 2 will be removed in NetBox v2.5. Please consider migration to Python 3 at your earliest "
-        "opportunity. Guidance is available in the documentation at http://netbox.readthedocs.io/.",
-        DeprecationWarning
-    )
 
-VERSION = '2.3.6'
+VERSION = '2.5.4'
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -44,6 +44,7 @@ BANNER_TOP = getattr(configuration, 'BANNER_TOP', '')
 BASE_PATH = getattr(configuration, 'BASE_PATH', '')
 if BASE_PATH:
     BASE_PATH = BASE_PATH.strip('/') + '/'  # Enforce trailing slash only
+CHANGELOG_RETENTION = getattr(configuration, 'CHANGELOG_RETENTION', 90)
 CORS_ORIGIN_ALLOW_ALL = getattr(configuration, 'CORS_ORIGIN_ALLOW_ALL', False)
 CORS_ORIGIN_REGEX_WHITELIST = getattr(configuration, 'CORS_ORIGIN_REGEX_WHITELIST', [])
 CORS_ORIGIN_WHITELIST = getattr(configuration, 'CORS_ORIGIN_WHITELIST', [])
@@ -54,6 +55,7 @@ ENFORCE_GLOBAL_UNIQUE = getattr(configuration, 'ENFORCE_GLOBAL_UNIQUE', False)
 EMAIL = getattr(configuration, 'EMAIL', {})
 LOGGING = getattr(configuration, 'LOGGING', {})
 LOGIN_REQUIRED = getattr(configuration, 'LOGIN_REQUIRED', False)
+LOGIN_TIMEOUT = getattr(configuration, 'LOGIN_TIMEOUT', None)
 MAINTENANCE_MODE = getattr(configuration, 'MAINTENANCE_MODE', False)
 MAX_PAGE_SIZE = getattr(configuration, 'MAX_PAGE_SIZE', 1000)
 MEDIA_ROOT = getattr(configuration, 'MEDIA_ROOT', os.path.join(BASE_DIR, 'media')).rstrip('/')
@@ -64,11 +66,14 @@ NAPALM_ARGS = getattr(configuration, 'NAPALM_ARGS', {})
 PAGINATE_COUNT = getattr(configuration, 'PAGINATE_COUNT', 50)
 PREFER_IPV4 = getattr(configuration, 'PREFER_IPV4', False)
 REPORTS_ROOT = getattr(configuration, 'REPORTS_ROOT', os.path.join(BASE_DIR, 'reports')).rstrip('/')
+REDIS = getattr(configuration, 'REDIS', {})
+SESSION_FILE_PATH = getattr(configuration, 'SESSION_FILE_PATH', None)
 SHORT_DATE_FORMAT = getattr(configuration, 'SHORT_DATE_FORMAT', 'Y-m-d')
 SHORT_DATETIME_FORMAT = getattr(configuration, 'SHORT_DATETIME_FORMAT', 'Y-m-d H:i')
 SHORT_TIME_FORMAT = getattr(configuration, 'SHORT_TIME_FORMAT', 'H:i:s')
 TIME_FORMAT = getattr(configuration, 'TIME_FORMAT', 'g:i a')
 TIME_ZONE = getattr(configuration, 'TIME_ZONE', 'UTC')
+WEBHOOKS_ENABLED = getattr(configuration, 'WEBHOOKS_ENABLED', False)
 
 CSRF_TRUSTED_ORIGINS = ALLOWED_HOSTS
 
@@ -109,6 +114,24 @@ DATABASES = {
     'default': configuration.DATABASE,
 }
 
+# Sessions
+if LOGIN_TIMEOUT is not None:
+    if type(LOGIN_TIMEOUT) is not int or LOGIN_TIMEOUT < 0:
+        raise ImproperlyConfigured(
+            "LOGIN_TIMEOUT must be a positive integer (value: {})".format(LOGIN_TIMEOUT)
+        )
+    # Django default is 1209600 seconds (14 days)
+    SESSION_COOKIE_AGE = LOGIN_TIMEOUT
+if SESSION_FILE_PATH is not None:
+    SESSION_ENGINE = 'django.contrib.sessions.backends.file'
+
+# Redis
+REDIS_HOST = REDIS.get('HOST', 'localhost')
+REDIS_PORT = REDIS.get('PORT', 6379)
+REDIS_PASSWORD = REDIS.get('PASSWORD', '')
+REDIS_DATABASE = REDIS.get('DATABASE', 0)
+REDIS_DEFAULT_TIMEOUT = REDIS.get('DEFAULT_TIMEOUT', 300)
+
 # Email
 EMAIL_HOST = EMAIL.get('SERVER')
 EMAIL_PORT = EMAIL.get('PORT', 25)
@@ -119,7 +142,7 @@ SERVER_EMAIL = EMAIL.get('FROM_EMAIL')
 EMAIL_SUBJECT_PREFIX = '[NetBox] '
 
 # Installed applications
-INSTALLED_APPS = (
+INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -133,6 +156,8 @@ INSTALLED_APPS = (
     'django_tables2',
     'mptt',
     'rest_framework',
+    'taggit',
+    'taggit_serializer',
     'timezone_field',
     'circuits',
     'dcim',
@@ -144,7 +169,11 @@ INSTALLED_APPS = (
     'utilities',
     'virtualization',
     'drf_yasg',
-)
+]
+
+# Only load django-rq if the webhook backend is enabled
+if WEBHOOKS_ENABLED:
+    INSTALLED_APPS.append('django_rq')
 
 # Middleware
 MIDDLEWARE = (
@@ -154,13 +183,13 @@ MIDDLEWARE = (
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.auth.middleware.SessionAuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'utilities.middleware.ExceptionHandlingMiddleware',
     'utilities.middleware.LoginRequiredMiddleware',
     'utilities.middleware.APIVersionMiddleware',
+    'extras.middleware.ObjectChangeMiddleware',
 )
 
 ROOT_URLCONF = 'netbox.urls'
@@ -217,9 +246,17 @@ LOGIN_URL = '/{}login/'.format(BASE_PATH)
 # Secrets
 SECRETS_MIN_PUBKEY_SIZE = 2048
 
+# Pagination
+PER_PAGE_DEFAULTS = [
+    25, 50, 100, 250, 500, 1000
+]
+if PAGINATE_COUNT not in PER_PAGE_DEFAULTS:
+    PER_PAGE_DEFAULTS.append(PAGINATE_COUNT)
+    PER_PAGE_DEFAULTS = sorted(PER_PAGE_DEFAULTS)
+
 # Django filters
 FILTERS_NULL_CHOICE_LABEL = 'None'
-FILTERS_NULL_CHOICE_VALUE = '0'  # Must be a string
+FILTERS_NULL_CHOICE_VALUE = 'null'
 
 # Django REST framework (API)
 REST_FRAMEWORK_VERSION = VERSION[0:3]  # Use major.minor as API version
@@ -246,11 +283,25 @@ REST_FRAMEWORK = {
     'VIEW_NAME_FUNCTION': 'netbox.api.get_view_name',
 }
 
+# Django RQ (Webhooks backend)
+RQ_QUEUES = {
+    'default': {
+        'HOST': REDIS_HOST,
+        'PORT': REDIS_PORT,
+        'DB': REDIS_DATABASE,
+        'PASSWORD': REDIS_PASSWORD,
+        'DEFAULT_TIMEOUT': REDIS_DEFAULT_TIMEOUT,
+    }
+}
+
 # drf_yasg settings for Swagger
 SWAGGER_SETTINGS = {
+    'DEFAULT_AUTO_SCHEMA_CLASS': 'utilities.custom_inspectors.NetBoxSwaggerAutoSchema',
     'DEFAULT_FIELD_INSPECTORS': [
         'utilities.custom_inspectors.NullableBooleanFieldInspector',
         'utilities.custom_inspectors.CustomChoiceFieldInspector',
+        'utilities.custom_inspectors.TagListFieldInspector',
+        'utilities.custom_inspectors.SerializedPKRelatedFieldInspector',
         'drf_yasg.inspectors.CamelCaseJSONFilter',
         'drf_yasg.inspectors.ReferencingSerializerInspector',
         'drf_yasg.inspectors.RelatedFieldInspector',

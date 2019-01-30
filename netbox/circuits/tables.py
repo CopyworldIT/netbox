@@ -1,5 +1,3 @@
-from __future__ import unicode_literals
-
 import django_tables2 as tables
 from django.utils.safestring import mark_safe
 from django_tables2.utils import Accessor
@@ -9,6 +7,9 @@ from utilities.tables import BaseTable, ToggleColumn
 from .models import Circuit, CircuitType, Provider
 
 CIRCUITTYPE_ACTIONS = """
+<a href="{% url 'circuits:circuittype_changelog' slug=record.slug %}" class="btn btn-default btn-xs" title="Changelog">
+    <i class="fa fa-history"></i>
+</a>
 {% if perms.circuit.change_circuittype %}
     <a href="{% url 'circuits:circuittype_edit' slug=record.slug %}" class="btn btn-xs btn-warning"><i class="glyphicon glyphicon-pencil" aria-hidden="true"></i></a>
 {% endif %}
@@ -22,12 +23,6 @@ STATUS_LABEL = """
 class CircuitTerminationColumn(tables.Column):
 
     def render(self, value):
-        if value.interface:
-            return mark_safe('<a href="{}" title="{}">{}</a>'.format(
-                value.interface.device.get_absolute_url(),
-                value.site,
-                value.interface.device
-            ))
         return mark_safe('<a href="{}">{}</a>'.format(
             value.site.get_absolute_url(),
             value.site

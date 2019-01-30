@@ -64,13 +64,6 @@ Once the new code is in place, run the upgrade script (which may need to be run 
 # ./upgrade.sh
 ```
 
-!!! warning
-    The upgrade script will prefer Python3 and pip3 if both executables are available. To force it to use Python2 and pip, use the `-2` argument as below.
-
-```no-highlight
-# ./upgrade.sh -2
-```
-
 This script:
 
 * Installs or upgrades any new required Python packages
@@ -91,4 +84,10 @@ Finally, restart the WSGI service to run the new code. If you followed this guid
 
 ```no-highlight
 # sudo supervisorctl restart netbox
+```
+
+If using webhooks, also restart the Redis worker:
+
+```no-highlight
+# sudo supervisorctl restart netbox-rqworker
 ```

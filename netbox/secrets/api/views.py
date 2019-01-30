@@ -1,5 +1,3 @@
-from __future__ import unicode_literals
-
 import base64
 
 from Crypto.PublicKey import RSA
@@ -37,7 +35,7 @@ class SecretRoleViewSet(ModelViewSet):
     queryset = SecretRole.objects.all()
     serializer_class = serializers.SecretRoleSerializer
     permission_classes = [IsAuthenticated]
-    filter_class = filters.SecretRoleFilter
+    filterset_class = filters.SecretRoleFilter
 
 
 #
@@ -48,27 +46,26 @@ class SecretViewSet(ModelViewSet):
     queryset = Secret.objects.select_related(
         'device__primary_ip4', 'device__primary_ip6', 'role',
     ).prefetch_related(
-        'role__users', 'role__groups',
+        'role__users', 'role__groups', 'tags',
     )
     serializer_class = serializers.SecretSerializer
-    write_serializer_class = serializers.WritableSecretSerializer
-    filter_class = filters.SecretFilter
+    filterset_class = filters.SecretFilter
 
     master_key = None
 
     def get_serializer_context(self):
 
         # Make the master key available to the serializer for encrypting plaintext values
-        context = super(SecretViewSet, self).get_serializer_context()
+        context = super().get_serializer_context()
         context['master_key'] = self.master_key
 
         return context
 
     def initial(self, request, *args, **kwargs):
 
-        super(SecretViewSet, self).initial(request, *args, **kwargs)
+        super().initial(request, *args, **kwargs)
 
-        if request.user.is_authenticated():
+        if request.user.is_authenticated:
 
             # Read session key from HTTP cookie or header if it has been provided. The session key must be provided in
             # order to encrypt/decrypt secrets.

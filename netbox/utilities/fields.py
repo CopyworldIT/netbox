@@ -1,11 +1,13 @@
-from __future__ import unicode_literals
-
 from django.core.validators import RegexValidator
 from django.db import models
 
 from .forms import ColorSelect
 
-validate_color = RegexValidator('^[0-9a-f]{6}$', 'Enter a valid hexadecimal RGB color code.', 'invalid')
+ColorValidator = RegexValidator(
+    regex='^[0-9a-f]{6}$',
+    message='Enter a valid hexadecimal RGB color code.',
+    code='invalid'
+)
 
 
 class NullableCharField(models.CharField):
@@ -21,13 +23,13 @@ class NullableCharField(models.CharField):
 
 
 class ColorField(models.CharField):
-    default_validators = [validate_color]
+    default_validators = [ColorValidator]
     description = "A hexadecimal RGB color code"
 
     def __init__(self, *args, **kwargs):
         kwargs['max_length'] = 6
-        super(ColorField, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def formfield(self, **kwargs):
         kwargs['widget'] = ColorSelect
-        return super(ColorField, self).formfield(**kwargs)
+        return super().formfield(**kwargs)

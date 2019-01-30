@@ -1,76 +1,41 @@
-from __future__ import unicode_literals
-
 from collections import OrderedDict
 
 from rest_framework import serializers
 from rest_framework.reverse import reverse
 from rest_framework.validators import UniqueTogetherValidator
+from taggit_serializer.serializers import TaggitSerializer, TagListSerializerField
 
-from dcim.api.serializers import NestedDeviceSerializer, InterfaceSerializer, NestedSiteSerializer
+from dcim.api.nested_serializers import NestedDeviceSerializer, NestedSiteSerializer
 from dcim.models import Interface
 from extras.api.customfields import CustomFieldModelSerializer
-from ipam.constants import (
-    IPADDRESS_ROLE_CHOICES, IPADDRESS_STATUS_CHOICES, IP_PROTOCOL_CHOICES, PREFIX_STATUS_CHOICES, VLAN_STATUS_CHOICES,
-)
+from ipam.constants import *
 from ipam.models import Aggregate, IPAddress, Prefix, RIR, Role, Service, VLAN, VLANGroup, VRF
-from tenancy.api.serializers import NestedTenantSerializer
-from utilities.api import ChoiceFieldSerializer, ValidatedModelSerializer
-from virtualization.api.serializers import NestedVirtualMachineSerializer
+from tenancy.api.nested_serializers import NestedTenantSerializer
+from utilities.api import (
+    ChoiceField, SerializedPKRelatedField, ValidatedModelSerializer, WritableNestedSerializer,
+)
+from virtualization.api.nested_serializers import NestedVirtualMachineSerializer
+from .nested_serializers import *
 
 
 #
 # VRFs
 #
 
-class VRFSerializer(CustomFieldModelSerializer):
-    tenant = NestedTenantSerializer()
+class VRFSerializer(TaggitSerializer, CustomFieldModelSerializer):
+    tenant = NestedTenantSerializer(required=False, allow_null=True)
+    tags = TagListSerializerField(required=False)
 
     class Meta:
         model = VRF
         fields = [
-            'id', 'name', 'rd', 'tenant', 'enforce_unique', 'description', 'display_name', 'custom_fields', 'created',
-            'last_updated',
-        ]
-
-
-class NestedVRFSerializer(serializers.ModelSerializer):
-    url = serializers.HyperlinkedIdentityField(view_name='ipam-api:vrf-detail')
-
-    class Meta:
-        model = VRF
-        fields = ['id', 'url', 'name', 'rd']
-
-
-class WritableVRFSerializer(CustomFieldModelSerializer):
-
-    class Meta:
-        model = VRF
-        fields = [
-            'id', 'name', 'rd', 'tenant', 'enforce_unique', 'description', 'custom_fields', 'created', 'last_updated',
+            'id', 'name', 'rd', 'tenant', 'enforce_unique', 'description', 'tags', 'display_name', 'custom_fields',
+            'created', 'last_updated',
         ]
 
 
 #
-# Roles
-#
-
-class RoleSerializer(ValidatedModelSerializer):
-
-    class Meta:
-        model = Role
-        fields = ['id', 'name', 'slug', 'weight']
-
-
-class NestedRoleSerializer(serializers.ModelSerializer):
-    url = serializers.HyperlinkedIdentityField(view_name='ipam-api:role-detail')
-
-    class Meta:
-        model = Role
-        fields = ['id', 'url', 'name', 'slug']
-
-
-#
-# RIRs
+# RIRs/aggregates
 #
 
 class RIRSerializer(ValidatedModelSerializer):
@@ -80,64 +45,32 @@ class RIRSerializer(ValidatedModelSerializer):
         fields = ['id', 'name', 'slug', 'is_private']
 
 
-class NestedRIRSerializer(serializers.ModelSerializer):
-    url = serializers.HyperlinkedIdentityField(view_name='ipam-api:rir-detail')
-
-    class Meta:
-        model = RIR
-        fields = ['id', 'url', 'name', 'slug']
-
-
-#
-# Aggregates
-#
-
-class AggregateSerializer(CustomFieldModelSerializer):
+class AggregateSerializer(TaggitSerializer, CustomFieldModelSerializer):
     rir = NestedRIRSerializer()
+    tags = TagListSerializerField(required=False)
 
     class Meta:
         model = Aggregate
         fields = [
-            'id', 'family', 'prefix', 'rir', 'date_added', 'description', 'custom_fields', 'created', 'last_updated',
+            'id', 'family', 'prefix', 'rir', 'date_added', 'description', 'tags', 'custom_fields', 'created',
+            'last_updated',
         ]
-
-
-class NestedAggregateSerializer(serializers.ModelSerializer):
-    url = serializers.HyperlinkedIdentityField(view_name='ipam-api:aggregate-detail')
-
-    class Meta(AggregateSerializer.Meta):
-        model = Aggregate
-        fields = ['id', 'url', 'family', 'prefix']
-
-
-class WritableAggregateSerializer(CustomFieldModelSerializer):
-
-    class Meta:
-        model = Aggregate
-        fields = ['id', 'prefix', 'rir', 'date_added', 'description', 'custom_fields', 'created', 'last_updated']
+        read_only_fields = ['family']
 
 
 #
-# VLAN groups
+# VLANs
 #
 
-class VLANGroupSerializer(serializers.ModelSerializer):
-    site = NestedSiteSerializer()
+class RoleSerializer(ValidatedModelSerializer):
 
     class Meta:
-        model = VLANGroup
-        fields = ['id', 'name', 'slug', 'site']
+        model = Role
+        fields = ['id', 'name', 'slug', 'weight']
 
 
-class NestedVLANGroupSerializer(serializers.ModelSerializer):
-    url = serializers.HyperlinkedIdentityField(view_name='ipam-api:vlangroup-detail')
-
-    class Meta:
-        model = VLANGroup
-        fields = ['id', 'url', 'name', 'slug']
-
-
-class WritableVLANGroupSerializer(serializers.ModelSerializer):
+class VLANGroupSerializer(ValidatedModelSerializer):
+    site = NestedSiteSerializer(required=False, allow_null=True)
 
     class Meta:
         model = VLANGroup
@@ -154,45 +87,24 @@ class WritableVLANGroupSerializer(serializers.ModelSerializer):
                 validator(data)
 
         # Enforce model validation
-        super(WritableVLANGroupSerializer, self).validate(data)
+        super().validate(data)
 
         return data
 
 
-#
-# VLANs
-#
-
-class VLANSerializer(CustomFieldModelSerializer):
-    site = NestedSiteSerializer()
-    group = NestedVLANGroupSerializer()
-    tenant = NestedTenantSerializer()
-    status = ChoiceFieldSerializer(choices=VLAN_STATUS_CHOICES)
-    role = NestedRoleSerializer()
+class VLANSerializer(TaggitSerializer, CustomFieldModelSerializer):
+    site = NestedSiteSerializer(required=False, allow_null=True)
+    group = NestedVLANGroupSerializer(required=False, allow_null=True)
+    tenant = NestedTenantSerializer(required=False, allow_null=True)
+    status = ChoiceField(choices=VLAN_STATUS_CHOICES, required=False)
+    role = NestedRoleSerializer(required=False, allow_null=True)
+    tags = TagListSerializerField(required=False)
 
     class Meta:
         model = VLAN
         fields = [
-            'id', 'site', 'group', 'vid', 'name', 'tenant', 'status', 'role', 'description', 'display_name',
+            'id', 'site', 'group', 'vid', 'name', 'tenant', 'status', 'role', 'description', 'tags', 'display_name',
             'custom_fields', 'created', 'last_updated',
-        ]
-
-
-class NestedVLANSerializer(serializers.ModelSerializer):
-    url = serializers.HyperlinkedIdentityField(view_name='ipam-api:vlan-detail')
-
-    class Meta:
-        model = VLAN
-        fields = ['id', 'url', 'vid', 'name', 'display_name']
-
-
-class WritableVLANSerializer(CustomFieldModelSerializer):
-
-    class Meta:
-        model = VLAN
-        fields = [
-            'id', 'site', 'group', 'vid', 'name', 'tenant', 'status', 'role', 'description', 'custom_fields', 'created',
-            'last_updated',
         ]
         validators = []
 
@@ -206,7 +118,7 @@ class WritableVLANSerializer(CustomFieldModelSerializer):
                 validator(data)
 
         # Enforce model validation
-        super(WritableVLANSerializer, self).validate(data)
+        super().validate(data)
 
         return data
 
@@ -215,42 +127,28 @@ class WritableVLANSerializer(CustomFieldModelSerializer):
 # Prefixes
 #
 
-class PrefixSerializer(CustomFieldModelSerializer):
-    site = NestedSiteSerializer()
-    vrf = NestedVRFSerializer()
-    tenant = NestedTenantSerializer()
-    vlan = NestedVLANSerializer()
-    status = ChoiceFieldSerializer(choices=PREFIX_STATUS_CHOICES)
-    role = NestedRoleSerializer()
+class PrefixSerializer(TaggitSerializer, CustomFieldModelSerializer):
+    site = NestedSiteSerializer(required=False, allow_null=True)
+    vrf = NestedVRFSerializer(required=False, allow_null=True)
+    tenant = NestedTenantSerializer(required=False, allow_null=True)
+    vlan = NestedVLANSerializer(required=False, allow_null=True)
+    status = ChoiceField(choices=PREFIX_STATUS_CHOICES, required=False)
+    role = NestedRoleSerializer(required=False, allow_null=True)
+    tags = TagListSerializerField(required=False)
 
     class Meta:
         model = Prefix
         fields = [
             'id', 'family', 'prefix', 'site', 'vrf', 'tenant', 'vlan', 'status', 'role', 'is_pool', 'description',
-            'custom_fields', 'created', 'last_updated',
+            'tags', 'custom_fields', 'created', 'last_updated',
         ]
-
-
-class NestedPrefixSerializer(serializers.ModelSerializer):
-    url = serializers.HyperlinkedIdentityField(view_name='ipam-api:prefix-detail')
-
-    class Meta:
-        model = Prefix
-        fields = ['id', 'url', 'family', 'prefix']
-
-
-class WritablePrefixSerializer(CustomFieldModelSerializer):
-
-    class Meta:
-        model = Prefix
-        fields = [
-            'id', 'prefix', 'site', 'vrf', 'tenant', 'vlan', 'status', 'role', 'is_pool', 'description',
-            'custom_fields', 'created', 'last_updated',
-        ]
+        read_only_fields = ['family']
 
 
 class AvailablePrefixSerializer(serializers.Serializer):
-
+    """
+    Representation of a prefix which does not exist in the database.
+    """
     def to_representation(self, instance):
         if self.context.get('vrf'):
             vrf = NestedVRFSerializer(self.context['vrf'], context={'request': self.context['request']}).data
@@ -267,12 +165,15 @@ class AvailablePrefixSerializer(serializers.Serializer):
 # IP addresses
 #
 
-class IPAddressInterfaceSerializer(serializers.ModelSerializer):
+class IPAddressInterfaceSerializer(WritableNestedSerializer):
+    """
+    Nested representation of an Interface which may belong to a Device *or* a VirtualMachine.
+    """
     url = serializers.SerializerMethodField()  # We're imitating a HyperlinkedIdentityField here
-    device = NestedDeviceSerializer()
-    virtual_machine = NestedVirtualMachineSerializer()
+    device = NestedDeviceSerializer(read_only=True)
+    virtual_machine = NestedVirtualMachineSerializer(read_only=True)
 
-    class Meta(InterfaceSerializer.Meta):
+    class Meta:
         model = Interface
         fields = [
             'id', 'url', 'device', 'virtual_machine', 'name',
@@ -287,45 +188,29 @@ class IPAddressInterfaceSerializer(serializers.ModelSerializer):
         return reverse(url_name, kwargs={'pk': obj.pk}, request=self.context['request'])
 
 
-class IPAddressSerializer(CustomFieldModelSerializer):
-    vrf = NestedVRFSerializer()
-    tenant = NestedTenantSerializer()
-    status = ChoiceFieldSerializer(choices=IPADDRESS_STATUS_CHOICES)
-    role = ChoiceFieldSerializer(choices=IPADDRESS_ROLE_CHOICES)
-    interface = IPAddressInterfaceSerializer()
+class IPAddressSerializer(TaggitSerializer, CustomFieldModelSerializer):
+    vrf = NestedVRFSerializer(required=False, allow_null=True)
+    tenant = NestedTenantSerializer(required=False, allow_null=True)
+    status = ChoiceField(choices=IPADDRESS_STATUS_CHOICES, required=False)
+    role = ChoiceField(choices=IPADDRESS_ROLE_CHOICES, required=False, allow_null=True)
+    interface = IPAddressInterfaceSerializer(required=False, allow_null=True)
+    nat_inside = NestedIPAddressSerializer(required=False, allow_null=True)
+    nat_outside = NestedIPAddressSerializer(read_only=True)
+    tags = TagListSerializerField(required=False)
 
     class Meta:
         model = IPAddress
         fields = [
             'id', 'family', 'address', 'vrf', 'tenant', 'status', 'role', 'interface', 'description', 'nat_inside',
-            'nat_outside', 'custom_fields', 'created', 'last_updated',
+            'nat_outside', 'tags', 'custom_fields', 'created', 'last_updated',
         ]
-
-
-class NestedIPAddressSerializer(serializers.ModelSerializer):
-    url = serializers.HyperlinkedIdentityField(view_name='ipam-api:ipaddress-detail')
-
-    class Meta:
-        model = IPAddress
-        fields = ['id', 'url', 'family', 'address']
-
-
-IPAddressSerializer._declared_fields['nat_inside'] = NestedIPAddressSerializer()
-IPAddressSerializer._declared_fields['nat_outside'] = NestedIPAddressSerializer()
-
-
-class WritableIPAddressSerializer(CustomFieldModelSerializer):
-
-    class Meta:
-        model = IPAddress
-        fields = [
-            'id', 'address', 'vrf', 'tenant', 'status', 'role', 'interface', 'description', 'nat_inside',
-            'custom_fields', 'created', 'last_updated',
-        ]
+        read_only_fields = ['family']
 
 
 class AvailableIPSerializer(serializers.Serializer):
-
+    """
+    Representation of an IP address which does not exist in the database.
+    """
     def to_representation(self, instance):
         if self.context.get('vrf'):
             vrf = NestedVRFSerializer(self.context['vrf'], context={'request': self.context['request']}).data
@@ -342,26 +227,20 @@ class AvailableIPSerializer(serializers.Serializer):
 # Services
 #
 
-class ServiceSerializer(serializers.ModelSerializer):
-    device = NestedDeviceSerializer()
-    virtual_machine = NestedVirtualMachineSerializer()
-    protocol = ChoiceFieldSerializer(choices=IP_PROTOCOL_CHOICES)
-    ipaddresses = NestedIPAddressSerializer(many=True)
+class ServiceSerializer(CustomFieldModelSerializer):
+    device = NestedDeviceSerializer(required=False, allow_null=True)
+    virtual_machine = NestedVirtualMachineSerializer(required=False, allow_null=True)
+    protocol = ChoiceField(choices=IP_PROTOCOL_CHOICES)
+    ipaddresses = SerializedPKRelatedField(
+        queryset=IPAddress.objects.all(),
+        serializer=NestedIPAddressSerializer,
+        required=False,
+        many=True
+    )
 
     class Meta:
         model = Service
         fields = [
-            'id', 'device', 'virtual_machine', 'name', 'port', 'protocol', 'ipaddresses', 'description', 'created',
-            'last_updated',
-        ]
-
-
-# TODO: Figure out how to use model validation with ManyToManyFields. Calling clean() yields a ValueError.
-class WritableServiceSerializer(serializers.ModelSerializer):
-
-    class Meta:
-        model = Service
-        fields = [
-            'id', 'device', 'virtual_machine', 'name', 'port', 'protocol', 'ipaddresses', 'description', 'created',
-            'last_updated',
+            'id', 'device', 'virtual_machine', 'name', 'port', 'protocol', 'ipaddresses', 'description',
+            'custom_fields', 'created', 'last_updated',
         ]

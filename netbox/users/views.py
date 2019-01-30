@@ -1,10 +1,8 @@
-from __future__ import unicode_literals
-
 from django.contrib import messages
 from django.contrib.auth import login as auth_login, logout as auth_logout, update_session_auth_hash
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.mixins import LoginRequiredMixin
-from django.http import HttpResponseRedirect
+from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
+from django.http import HttpResponseForbidden, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.decorators import method_decorator
@@ -38,7 +36,7 @@ class LoginView(View):
 
             # Determine where to direct user after successful login
             redirect_to = request.POST.get('next', '')
-            if not is_safe_url(url=redirect_to, host=request.get_host()):
+            if not is_safe_url(url=redirect_to, allowed_hosts=request.get_host()):
                 redirect_to = reverse('home')
 
             # Authenticate user
@@ -134,7 +132,7 @@ class UserKeyEditView(View):
         except UserKey.DoesNotExist:
             self.userkey = UserKey(user=request.user)
 
-        return super(UserKeyEditView, self).dispatch(request, *args, **kwargs)
+        return super().dispatch(request, *args, **kwargs)
 
     def get(self, request):
         form = UserKeyForm(instance=self.userkey)
@@ -198,18 +196,6 @@ class SessionKeyDeleteView(LoginRequiredMixin, View):
         })
 
 
-@method_decorator(login_required, name='dispatch')
-class RecentActivityView(View):
-    template_name = 'users/recent_activity.html'
-
-    def get(self, request):
-
-        return render(request, self.template_name, {
-            'recent_activity': request.user.actions.all()[:50],
-            'active_tab': 'recent_activity',
-        })
-
-
 #
 # API tokens
 #
@@ -231,8 +217,12 @@ class TokenEditView(LoginRequiredMixin, View):
     def get(self, request, pk=None):
 
         if pk is not None:
+            if not request.user.has_perm('users.change_token'):
+                return HttpResponseForbidden()
             token = get_object_or_404(Token.objects.filter(user=request.user), pk=pk)
         else:
+            if not request.user.has_perm('users.add_token'):
+                return HttpResponseForbidden()
             token = Token(user=request.user)
 
         form = TokenForm(instance=token)
@@ -274,7 +264,8 @@ class TokenEditView(LoginRequiredMixin, View):
         })
 
 
-class TokenDeleteView(LoginRequiredMixin, View):
+class TokenDeleteView(PermissionRequiredMixin, View):
+    permission_required = 'users.delete_token'
 
     def get(self, request, pk):
 

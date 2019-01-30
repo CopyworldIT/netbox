@@ -1,9 +1,11 @@
-from __future__ import unicode_literals
+from collections import OrderedDict
 
 import datetime
-import six
+import json
 
-from django.http import HttpResponse
+from django.core.serializers import serialize
+
+from dcim.constants import LENGTH_UNIT_CENTIMETER, LENGTH_UNIT_FOOT, LENGTH_UNIT_INCH, LENGTH_UNIT_METER
 
 
 def csv_format(data):
@@ -23,7 +25,7 @@ def csv_format(data):
             value = value.isoformat()
 
         # Force conversion to string first so we can check for any commas
-        if not isinstance(value, six.string_types):
+        if not isinstance(value, str):
             value = '{}'.format(value)
 
         # Double-quote the value if it contains a comma
@@ -33,32 +35,6 @@ def csv_format(data):
             csv.append('{}'.format(value))
 
     return ','.join(csv)
-
-
-def queryset_to_csv(queryset):
-    """
-    Export a queryset of objects as CSV, using the model's to_csv() method.
-    """
-    output = []
-
-    # Start with the column headers
-    headers = ','.join(queryset.model.csv_headers)
-    output.append(headers)
-
-    # Iterate through the queryset
-    for obj in queryset:
-        data = csv_format(obj.to_csv())
-        output.append(data)
-
-    # Build the HTTP response
-    response = HttpResponse(
-        '\n'.join(output),
-        content_type='text/csv'
-    )
-    filename = 'netbox_{}.csv'.format(queryset.model._meta.verbose_name_plural)
-    response['Content-Disposition'] = 'attachment; filename="{}"'.format(filename)
-
-    return response
 
 
 def foreground_color(bg_color):
@@ -71,3 +47,70 @@ def foreground_color(bg_color):
         return '000000'
     else:
         return 'ffffff'
+
+
+def dynamic_import(name):
+    """
+    Dynamically import a class from an absolute path string
+    """
+    components = name.split('.')
+    mod = __import__(components[0])
+    for comp in components[1:]:
+        mod = getattr(mod, comp)
+    return mod
+
+
+def serialize_object(obj, extra=None):
+    """
+    Return a generic JSON representation of an object using Django's built-in serializer. (This is used for things like
+    change logging, not the REST API.) Optionally include a dictionary to supplement the object data.
+    """
+    json_str = serialize('json', [obj])
+    data = json.loads(json_str)[0]['fields']
+
+    # Include any custom fields
+    if hasattr(obj, 'get_custom_fields'):
+        data['custom_fields'] = {
+            field.name: str(value) for field, value in obj.get_custom_fields().items()
+        }
+
+    # Include any tags
+    if hasattr(obj, 'tags'):
+        data['tags'] = [tag.name for tag in obj.tags.all()]
+
+    # Append any extra data
+    if extra is not None:
+        data.update(extra)
+
+    return data
+
+
+def deepmerge(original, new):
+    """
+    Deep merge two dictionaries (new into original) and return a new dict
+    """
+    merged = OrderedDict(original)
+    for key, val in new.items():
+        if key in original and isinstance(original[key], dict) and isinstance(val, dict):
+            merged[key] = deepmerge(original[key], val)
+        else:
+            merged[key] = val
+    return merged
+
+
+def to_meters(length, unit):
+    """
+    Convert the given length to meters.
+    """
+    length = int(length)
+    if length < 0:
+        raise ValueError("Length must be a positive integer")
+    if unit == LENGTH_UNIT_METER:
+        return length
+    if unit == LENGTH_UNIT_CENTIMETER:
+        return length / 100
+    if unit == LENGTH_UNIT_FOOT:
+        return length * 0.3048
+    if unit == LENGTH_UNIT_INCH:
+        return length * 0.3048 * 12
+    raise ValueError("Unknown unit {}. Must be 'm', 'cm', 'ft', or 'in'.".format(unit))

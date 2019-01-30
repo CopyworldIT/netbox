@@ -1,4 +1,4 @@
-{% load static from staticfiles %}
+{% load static %}
 {% load helpers %}
 <nav class="navbar navbar-default navbar-fixed-top">
     <div class="container">
@@ -16,7 +16,7 @@
         <div id="navbar" class="navbar-collapse collapse">
             {% if request.user.is_authenticated or not settings.LOGIN_REQUIRED %}
             <ul class="nav navbar-nav">
-                <li class="dropdown{% if request.path|contains:'/dcim/sites/,/dcim/regions/,/tenancy/,/extras/reports/' %} active{% endif %}">
+                <li class="dropdown{% if request.path|contains:'/dcim/sites/,/dcim/regions/,/tenancy/,/extras/tags/,/extras/reports/' %} active{% endif %}">
                     <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-haspopup="true" aria-expanded="false">Organization <span class="caret"></span></a>
                     <ul class="dropdown-menu">
                         <li class="dropdown-header">Sites</li>
@@ -61,7 +61,16 @@
                         <li class="divider"></li>
                         <li class="dropdown-header">Miscellaneous</li>
                         <li>
+                            <a href="{% url 'extras:tag_list' %}">Tags</a>
+                        </li>
+                        <li>
+                            <a href="{% url 'extras:configcontext_list' %}">Config Contexts</a>
+                        </li>
+                        <li>
                             <a href="{% url 'extras:report_list' %}">Reports</a>
+                        </li>
+                        <li>
+                            <a href="{% url 'extras:objectchange_list' %}">Changelog</a>
                         </li>
                     </ul>
                 </li>
@@ -104,7 +113,7 @@
                         </li>
                     </ul>
                 </li>
-                <li class="dropdown{% if request.path|contains:'/dcim/device,/dcim/virtual-chassis,/dcim/manufacturers/,/dcim/platforms/,-connections/,/dcim/inventory-items/' %} active{% endif %}">
+                <li class="dropdown{% if request.path|contains:'/dcim/device,/dcim/virtual-chassis,/dcim/manufacturers/,/dcim/platforms/,/dcim/cable,-connections/,/dcim/inventory-items/' %} active{% endif %}">
                     <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-haspopup="true" aria-expanded="false">Devices <span class="caret"></span></a>
                     <ul class="dropdown-menu">
                         <li class="dropdown-header">Devices</li>
@@ -171,27 +180,20 @@
                         <li class="divider"></li>
                         <li class="dropdown-header">Connections</li>
                         <li>
-                            {% if perms.dcim.change_consoleport %}
+                            {% if perms.dcim.add_cable %}
                                 <div class="buttons pull-right">
-                                    <a href="{% url 'dcim:console_connections_import' %}" class="btn btn-xs btn-info" title="Import"><i class="fa fa-download"></i></a>
+                                    <a href="{% url 'dcim:cable_import' %}" class="btn btn-xs btn-info" title="Import"><i class="fa fa-download"></i></a>
                                 </div>
                             {% endif %}
+                            <a href="{% url 'dcim:cable_list' %}">Cables</a>
+                        </li>
+                        <li>
                             <a href="{% url 'dcim:console_connections_list' %}">Console Connections</a>
                         </li>
                         <li>
-                            {% if perms.dcim.change_powerport %}
-                                <div class="buttons pull-right">
-                                    <a href="{% url 'dcim:power_connections_import' %}" class="btn btn-xs btn-info" title="Import"><i class="fa fa-download"></i></a>
-                                </div>
-                            {% endif %}
                             <a href="{% url 'dcim:power_connections_list' %}">Power Connections</a>
                         </li>
                         <li>
-                            {% if perms.dcim.add_interfaceconnection %}
-                                <div class="buttons pull-right">
-                                    <a href="{% url 'dcim:interface_connections_import' %}" class="btn btn-xs btn-info" title="Import"><i class="fa fa-download"></i></a>
-                                </div>
-                            {% endif %}
                             <a href="{% url 'dcim:interface_connections_list' %}">Interface Connections</a>
                         </li>
                     </ul>
@@ -279,6 +281,11 @@
                                 </div>
                             {% endif %}
                             <a href="{% url 'ipam:vlangroup_list' %}">VLAN Groups</a>
+                        </li>
+                        <li class="divider"></li>
+                        <li class="dropdown-header">Services</li>
+                        <li>
+                            <a href="{% url 'ipam:service_list' %}">Services</a>
                         </li>
                     </ul>
                 </li>

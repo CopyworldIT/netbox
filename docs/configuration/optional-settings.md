@@ -1,4 +1,4 @@
-The following are optional settings which may be declared in `netbox/netbox/configuration.py`.
+# Optional Configuration Settings
 
 ## ADMINS
 
@@ -41,6 +41,14 @@ The base URL path to use when accessing NetBox. Do not include the scheme or dom
 ```
 BASE_PATH = 'netbox/'
 ```
+
+---
+
+## CHANGELOG_RETENTION
+
+Default: 90
+
+The number of days to retain logged changes (object creations, updates, and deletions). Set this to `0` to retain changes in the database indefinitely. (Warning: This will greatly increase database size over time.)
 
 ---
 
@@ -122,6 +130,14 @@ LOGGING = {
 Default: False
 
 Setting this to True will permit only authenticated users to access any part of NetBox. By default, anonymous users are permitted to access most data in NetBox (excluding secrets) but not make any changes.
+
+---
+
+## LOGIN_TIMEOUT
+
+Default: 1209600 seconds (14 days)
+
+The liftetime (in seconds) of the authentication cookie issued to a NetBox user upon login.
 
 ---
 
@@ -215,11 +231,27 @@ The file path to the location where custom reports will be kept. By default, thi
 
 ---
 
+## SESSION_FILE_PATH
+
+Default: None
+
+Session data is used to track authenticated users when they access NetBox. By default, NetBox stores session data in the PostgreSQL database. However, this inhibits authentication to a standby instance of NetBox without write access to the database. Alternatively, a local file path may be specified here and NetBox will store session data as files instead of using the database. Note that the user as which NetBox runs must have read and write permissions to this path.
+
+---
+
 ## TIME_ZONE
 
 Default: UTC
 
 The time zone NetBox will use when dealing with dates and times. It is recommended to use UTC time unless you have a specific need to use a local time zone. [List of available time zones](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones).
+
+---
+
+## WEBHOOKS_ENABLED
+
+Default: False
+
+Enable this option to run the webhook backend. See the docs section on the webhook backend [here](../additional-features/webhooks/) for more information on setup and use.
 
 ---
 
@@ -237,3 +269,49 @@ SHORT_TIME_FORMAT = 'H:i:s'          # 13:23:00
 DATETIME_FORMAT = 'N j, Y g:i a'     # June 26, 2016 1:23 p.m.
 SHORT_DATETIME_FORMAT = 'Y-m-d H:i'  # 2016-06-27 13:23
 ```
+
+---
+
+## Redis Connection Settings
+
+[Redis](https://redis.io/) is a key-value store which functions as a very lightweight database. It is required when enabling NetBox [webhooks](../additional-features/webhooks/). A Redis connection is configured using a dictionary similar to the following:
+
+```
+REDIS = {
+    'HOST': 'localhost',
+    'PORT': 6379,
+    'PASSWORD': '',
+    'DATABASE': 0,
+    'DEFAULT_TIMEOUT': 300,
+}
+```
+
+### DATABASE
+
+Default: 0
+
+The Redis database ID.
+
+### DEFAULT_TIMEOUT
+
+Default: 300
+
+The timeout value to use when connecting to the Redis server (in seconds).
+
+### HOST
+
+Default: localhost
+
+The hostname or IP address of the Redis server.
+
+### PORT
+
+Default: 6379
+
+The TCP port to use when connecting to the Redis server.
+
+### PASSWORD
+
+Default: None
+
+The password to use when authenticating to the Redis server (optional).

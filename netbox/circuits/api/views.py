@@ -1,7 +1,5 @@
-from __future__ import unicode_literals
-
 from django.shortcuts import get_object_or_404
-from rest_framework.decorators import detail_route
+from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from circuits import filters
@@ -29,12 +27,11 @@ class CircuitsFieldChoicesViewSet(FieldChoicesViewSet):
 #
 
 class ProviderViewSet(CustomFieldModelViewSet):
-    queryset = Provider.objects.all()
+    queryset = Provider.objects.prefetch_related('tags')
     serializer_class = serializers.ProviderSerializer
-    write_serializer_class = serializers.WritableProviderSerializer
-    filter_class = filters.ProviderFilter
+    filterset_class = filters.ProviderFilter
 
-    @detail_route()
+    @action(detail=True)
     def graphs(self, request, pk=None):
         """
         A convenience method for rendering graphs for a particular provider.
@@ -52,7 +49,7 @@ class ProviderViewSet(CustomFieldModelViewSet):
 class CircuitTypeViewSet(ModelViewSet):
     queryset = CircuitType.objects.all()
     serializer_class = serializers.CircuitTypeSerializer
-    filter_class = filters.CircuitTypeFilter
+    filterset_class = filters.CircuitTypeFilter
 
 
 #
@@ -60,10 +57,9 @@ class CircuitTypeViewSet(ModelViewSet):
 #
 
 class CircuitViewSet(CustomFieldModelViewSet):
-    queryset = Circuit.objects.select_related('type', 'tenant', 'provider')
+    queryset = Circuit.objects.select_related('type', 'tenant', 'provider').prefetch_related('tags')
     serializer_class = serializers.CircuitSerializer
-    write_serializer_class = serializers.WritableCircuitSerializer
-    filter_class = filters.CircuitFilter
+    filterset_class = filters.CircuitFilter
 
 
 #
@@ -71,7 +67,8 @@ class CircuitViewSet(CustomFieldModelViewSet):
 #
 
 class CircuitTerminationViewSet(ModelViewSet):
-    queryset = CircuitTermination.objects.select_related('circuit', 'site', 'interface__device')
+    queryset = CircuitTermination.objects.select_related(
+        'circuit', 'site', 'connected_endpoint__device', 'cable'
+    )
     serializer_class = serializers.CircuitTerminationSerializer
-    write_serializer_class = serializers.WritableCircuitTerminationSerializer
-    filter_class = filters.CircuitTerminationFilter
+    filterset_class = filters.CircuitTerminationFilter
