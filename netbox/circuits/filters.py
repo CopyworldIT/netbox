@@ -1,22 +1,40 @@
 import django_filters
 from django.db.models import Q
 
-from dcim.models import Site
-from extras.filters import CustomFieldFilterSet
-from tenancy.models import Tenant
-from utilities.filters import NumericInFilter, TagFilter
-from .constants import CIRCUIT_STATUS_CHOICES
-from .models import Provider, Circuit, CircuitTermination, CircuitType
+from dcim.models import Region, Site
+from extras.filters import CustomFieldFilterSet, CreatedUpdatedFilterSet
+from tenancy.filters import TenancyFilterSet
+from utilities.filters import (
+    BaseFilterSet, NameSlugSearchFilterSet, TagFilter, TreeNodeMultipleChoiceFilter
+)
+from .choices import *
+from .models import Circuit, CircuitTermination, CircuitType, Provider
+
+__all__ = (
+    'CircuitFilterSet',
+    'CircuitTerminationFilterSet',
+    'CircuitTypeFilterSet',
+    'ProviderFilterSet',
+)
 
 
-class ProviderFilter(CustomFieldFilterSet, django_filters.FilterSet):
-    id__in = NumericInFilter(
-        field_name='id',
-        lookup_expr='in'
-    )
+class ProviderFilterSet(BaseFilterSet, CustomFieldFilterSet, CreatedUpdatedFilterSet):
     q = django_filters.CharFilter(
         method='search',
         label='Search',
+    )
+    region_id = TreeNodeMultipleChoiceFilter(
+        queryset=Region.objects.all(),
+        field_name='circuits__terminations__site__region',
+        lookup_expr='in',
+        label='Region (ID)',
+    )
+    region = TreeNodeMultipleChoiceFilter(
+        queryset=Region.objects.all(),
+        field_name='circuits__terminations__site__region',
+        lookup_expr='in',
+        to_field_name='slug',
+        label='Region (slug)',
     )
     site_id = django_filters.ModelMultipleChoiceFilter(
         field_name='circuits__terminations__site',
@@ -33,7 +51,7 @@ class ProviderFilter(CustomFieldFilterSet, django_filters.FilterSet):
 
     class Meta:
         model = Provider
-        fields = ['name', 'slug', 'asn', 'account']
+        fields = ['id', 'name', 'slug', 'asn', 'account']
 
     def search(self, queryset, name, value):
         if not value.strip():
@@ -47,18 +65,14 @@ class ProviderFilter(CustomFieldFilterSet, django_filters.FilterSet):
         )
 
 
-class CircuitTypeFilter(django_filters.FilterSet):
+class CircuitTypeFilterSet(BaseFilterSet, NameSlugSearchFilterSet):
 
     class Meta:
         model = CircuitType
-        fields = ['name', 'slug']
+        fields = ['id', 'name', 'slug']
 
 
-class CircuitFilter(CustomFieldFilterSet, django_filters.FilterSet):
-    id__in = NumericInFilter(
-        field_name='id',
-        lookup_expr='in'
-    )
+class CircuitFilterSet(BaseFilterSet, CustomFieldFilterSet, TenancyFilterSet, CreatedUpdatedFilterSet):
     q = django_filters.CharFilter(
         method='search',
         label='Search',
@@ -84,18 +98,8 @@ class CircuitFilter(CustomFieldFilterSet, django_filters.FilterSet):
         label='Circuit type (slug)',
     )
     status = django_filters.MultipleChoiceFilter(
-        choices=CIRCUIT_STATUS_CHOICES,
+        choices=CircuitStatusChoices,
         null_value=None
-    )
-    tenant_id = django_filters.ModelMultipleChoiceFilter(
-        queryset=Tenant.objects.all(),
-        label='Tenant (ID)',
-    )
-    tenant = django_filters.ModelMultipleChoiceFilter(
-        field_name='tenant__slug',
-        queryset=Tenant.objects.all(),
-        to_field_name='slug',
-        label='Tenant (slug)',
     )
     site_id = django_filters.ModelMultipleChoiceFilter(
         field_name='terminations__site',
@@ -108,11 +112,24 @@ class CircuitFilter(CustomFieldFilterSet, django_filters.FilterSet):
         to_field_name='slug',
         label='Site (slug)',
     )
+    region_id = TreeNodeMultipleChoiceFilter(
+        queryset=Region.objects.all(),
+        field_name='terminations__site__region',
+        lookup_expr='in',
+        label='Region (ID)',
+    )
+    region = TreeNodeMultipleChoiceFilter(
+        queryset=Region.objects.all(),
+        field_name='terminations__site__region',
+        lookup_expr='in',
+        to_field_name='slug',
+        label='Region (slug)',
+    )
     tag = TagFilter()
 
     class Meta:
         model = Circuit
-        fields = ['cid', 'install_date', 'commit_rate']
+        fields = ['id', 'cid', 'install_date', 'commit_rate']
 
     def search(self, queryset, name, value):
         if not value.strip():
@@ -127,7 +144,7 @@ class CircuitFilter(CustomFieldFilterSet, django_filters.FilterSet):
         ).distinct()
 
 
-class CircuitTerminationFilter(django_filters.FilterSet):
+class CircuitTerminationFilterSet(BaseFilterSet):
     q = django_filters.CharFilter(
         method='search',
         label='Search',

@@ -5,8 +5,13 @@ from django.core.paginator import Paginator, Page
 class EnhancedPaginator(Paginator):
 
     def __init__(self, object_list, per_page, **kwargs):
-        if not isinstance(per_page, int) or per_page < 1:
-            per_page = getattr(settings, 'PAGINATE_COUNT', 50)
+        try:
+            per_page = int(per_page)
+            if per_page < 1:
+                per_page = settings.PAGINATE_COUNT
+        except ValueError:
+            per_page = settings.PAGINATE_COUNT
+
         super().__init__(object_list, per_page, **kwargs)
 
     def _get_page(self, *args, **kwargs):
@@ -32,3 +37,25 @@ class EnhancedPage(Page):
             page_list.insert(page_list.index(i), False)
 
         return page_list
+
+
+def get_paginate_count(request):
+    """
+    Determine the length of a page, using the following in order:
+
+        1. per_page URL query parameter
+        2. Saved user preference
+        3. PAGINATE_COUNT global setting.
+    """
+    if 'per_page' in request.GET:
+        try:
+            per_page = int(request.GET.get('per_page'))
+            if request.user.is_authenticated:
+                request.user.config.set('pagination.per_page', per_page, commit=True)
+            return per_page
+        except ValueError:
+            pass
+
+    if request.user.is_authenticated:
+        return request.user.config.get('pagination.per_page', settings.PAGINATE_COUNT)
+    return settings.PAGINATE_COUNT

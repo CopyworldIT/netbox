@@ -1,16 +1,57 @@
+from django.http import QueryDict
 from django.test import TestCase
 
-from utilities.utils import deepmerge
+from utilities.utils import deepmerge, dict_to_filter_params, normalize_querydict
+
+
+class DictToFilterParamsTest(TestCase):
+    """
+    Validate the operation of dict_to_filter_params().
+    """
+    def test_dict_to_filter_params(self):
+
+        input = {
+            'a': True,
+            'foo': {
+                'bar': 123,
+                'baz': 456,
+            },
+            'x': {
+                'y': {
+                    'z': False
+                }
+            }
+        }
+
+        output = {
+            'a': True,
+            'foo__bar': 123,
+            'foo__baz': 456,
+            'x__y__z': False,
+        }
+
+        self.assertEqual(dict_to_filter_params(input), output)
+
+        input['x']['y']['z'] = True
+
+        self.assertNotEqual(dict_to_filter_params(input), output)
+
+
+class NormalizeQueryDictTest(TestCase):
+    """
+    Validate normalize_querydict() utility function.
+    """
+    def test_normalize_querydict(self):
+        self.assertDictEqual(
+            normalize_querydict(QueryDict('foo=1&bar=2&bar=3&baz=')),
+            {'foo': '1', 'bar': ['2', '3'], 'baz': ''}
+        )
 
 
 class DeepMergeTest(TestCase):
     """
     Validate the behavior of the deepmerge() utility.
     """
-
-    def setUp(self):
-        return
-
     def test_deepmerge(self):
 
         dict1 = {

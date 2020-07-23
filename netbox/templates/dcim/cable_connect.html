@@ -1,10 +1,10 @@
-{% extends '_base.html' %}
+{% extends 'base.html' %}
 {% load static %}
 {% load helpers %}
 {% load form_helpers %}
 
 {% block content %}
-<form action="." method="post" class="form form-horizontal">
+<form method="post" class="form form-horizontal">
     {% csrf_token %}
     {% for field in form.hidden_fields %}
         {{ field }}
@@ -22,7 +22,7 @@
         </div>
     {% endif %}
     {% with termination_a=form.instance.termination_a %}
-        <h3>{% block title %}Connect {{ termination_a.device }} {{ termination_a }}{% endblock %}</h3>
+        <h3>{% block title %}Connect {{ termination_a.device }} {{ termination_a }} to {{ termination_b_type|bettertitle }}{% endblock %}</h3>
         <div class="row">
             <div class="col-md-5">
                 <div class="panel panel-default">
@@ -53,7 +53,7 @@
                             <div class="form-group">
                                 <label class="col-md-3 control-label required">Type</label>
                                 <div class="col-md-9">
-                                    <p class="form-control-static">{{ termination_a|model_name|capfirst }}</p>
+                                    <p class="form-control-static">{{ termination_a|meta:"verbose_name"|capfirst }}</p>
                                 </div>
                             </div>
                             <div class="form-group">
@@ -101,46 +101,51 @@
                         <strong>B Side</strong>
                     </div>
                     <div class="panel-body">
-                        <ul class="nav nav-tabs" role="tablist">
-                            <li role="presentation" class="active"><a href="#search" aria-controls="search" role="tab" data-toggle="tab">Search</a></li>
-                            <li role="presentation"><a href="#select" aria-controls="home" role="tab" data-toggle="tab">Select</a></li>
-                        </ul>
-                        <div class="tab-content">
-                            <div class="tab-pane active" id="search">
-                                &nbsp;
-                            </div>
-                            <div class="tab-pane" id="select">
-                                {% render_field form.termination_b_site %}
-                                {% render_field form.termination_b_rack %}
+                        {% if tabs %}
+                            <ul class="nav nav-tabs">
+                                {% for url, link in tabs %}
+                                    <li role="presentation"><a href="{{ url }}">{{ link }}</a></li>
+                                {% endfor %}
+                            </ul>
+                        {% endif %}
+                        {% if 'termination_b_provider' in form.fields %}
+                            {% render_field form.termination_b_provider %}
+                        {% endif %}
+                        {% if 'termination_b_site' in form.fields %}
+                            {% render_field form.termination_b_site %}
+                        {% endif %}
+                        {% if 'termination_b_rackgroup' in form.fields %}
+                            {% render_field form.termination_b_rackgroup %}
+                        {% endif %}
+                        {% if 'termination_b_rack' in form.fields %}
+                            {% render_field form.termination_b_rack %}
+                        {% endif %}
+                        {% if 'termination_b_device' in form.fields %}
+                            {% render_field form.termination_b_device %}
+                        {% endif %}
+                        {% if 'termination_b_type' in form.fields %}
+                            {% render_field form.termination_b_type %}
+                        {% endif %}
+                        {% if 'termination_b_powerpanel' in form.fields %}
+                            {% render_field form.termination_b_powerpanel %}
+                        {% endif %}
+                        {% if 'termination_b_circuit' in form.fields %}
+                            {% render_field form.termination_b_circuit %}
+                        {% endif %}
+                        <div class="form-group">
+                            <label class="col-md-3 control-label required">Type</label>
+                            <div class="col-md-9">
+                                <p class="form-control-static">{{ termination_b_type|capfirst }}</p>
                             </div>
                         </div>
-                        {% render_field form.termination_b_device %}
-                        {% render_field form.termination_b_type %}
                         {% render_field form.termination_b_id %}
                     </div>
                 </div>
             </div>
         </div>
         <div class="row">
-            <div class="col-md-4 col-md-offset-4">
-                <div class="panel panel-default">
-                    <div class="panel-heading"><strong>Cable</strong></div>
-                    <div class="panel-body">
-                        {% render_field form.status %}
-                        {% render_field form.type %}
-                        {% render_field form.label %}
-                        {% render_field form.color %}
-                        <div class="form-group">
-                            <label class="col-md-3 control-label" for="id_length">{{ form.length.label }}</label>
-                            <div class="col-md-6">
-                                {{ form.length }}
-                            </div>
-                            <div class="col-md-3">
-                                {{ form.length_unit }}
-                            </div>
-                        </div>
-                    </div>
-                </div>
+            <div class="col-md-6 col-md-offset-3">
+                {% include 'dcim/inc/cable_form.html' %}
             </div>
         </div>
         <div class="form-group">

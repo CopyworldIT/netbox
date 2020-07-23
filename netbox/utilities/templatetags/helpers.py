@@ -2,13 +2,15 @@ import datetime
 import json
 import re
 
+import yaml
 from django import template
+from django.conf import settings
+from django.urls import NoReverseMatch, reverse
+from django.utils.html import strip_tags
 from django.utils.safestring import mark_safe
 from markdown import markdown
 
-from utilities.forms import unpack_grouped_choices
 from utilities.utils import foreground_color
-
 
 register = template.Library()
 
@@ -16,15 +18,6 @@ register = template.Library()
 #
 # Filters
 #
-
-@register.filter()
-def oneline(value):
-    """
-    Replace each line break with a single space
-    """
-    value = value.replace('\r', '')
-    return value.replace('\n', ' ')
-
 
 @register.filter()
 def placeholder(value):
@@ -37,28 +30,22 @@ def placeholder(value):
     return mark_safe(placeholder)
 
 
-@register.filter()
-def getlist(value, arg):
-    """
-    Return all values of a QueryDict key
-    """
-    return value.getlist(arg)
-
-
-@register.filter
-def getkey(value, key):
-    """
-    Return a dictionary item specified by key
-    """
-    return value[key]
-
-
 @register.filter(is_safe=True)
-def gfm(value):
+def render_markdown(value):
     """
-    Render text as GitHub-Flavored Markdown
+    Render text as Markdown
     """
-    html = markdown(value, extensions=['mdx_gfm'])
+    # Strip HTML tags
+    value = strip_tags(value)
+
+    # Sanitize Markdown links
+    schemes = '|'.join(settings.ALLOWED_URL_SCHEMES)
+    pattern = fr'\[(.+)\]\((?!({schemes})).*:(.+)\)'
+    value = re.sub(pattern, '[\\1](\\3)', value, flags=re.IGNORECASE)
+
+    # Render Markdown
+    html = markdown(value, extensions=['fenced_code', 'tables'])
+
     return mark_safe(html)
 
 
@@ -71,27 +58,35 @@ def render_json(value):
 
 
 @register.filter()
-def model_name(obj):
+def render_yaml(value):
     """
-    Return the name of the model of the given object
+    Render a dictionary as formatted YAML.
     """
-    return obj._meta.verbose_name
+    return yaml.dump(json.loads(json.dumps(value)))
 
 
 @register.filter()
-def model_name_plural(obj):
+def meta(obj, attr):
     """
-    Return the plural name of the model of the given object
+    Return the specified Meta attribute of a model. This is needed because Django does not permit templates
+    to access attributes which begin with an underscore (e.g. _meta).
     """
-    return obj._meta.verbose_name_plural
+    return getattr(obj._meta, attr, '')
 
 
 @register.filter()
-def contains(value, arg):
+def url_name(model, action):
     """
-    Test whether a value contains any of a given set of strings. `arg` should be a comma-separated list of strings.
+    Return the URL name for the given model and action, or None if invalid.
     """
-    return any(s in value for s in arg.split(','))
+    url_name = '{}:{}_{}'.format(model._meta.app_label, model._meta.model_name, action)
+    try:
+        # Validate and return the URL name. We don't return the actual URL yet because many of the templates
+        # are written to pass a name to {% url %}.
+        reverse(url_name)
+        return url_name
+    except NoReverseMatch:
+        return None
 
 
 @register.filter()
@@ -126,28 +121,6 @@ def humanize_speed(speed):
 
 
 @register.filter()
-def example_choices(field, arg=3):
-    """
-    Returns a number (default: 3) of example choices for a ChoiceFiled (useful for CSV import forms).
-    """
-    examples = []
-    if hasattr(field, 'queryset'):
-        choices = [
-            (obj.pk, getattr(obj, field.to_field_name)) for obj in field.queryset[:arg + 1]
-        ]
-    else:
-        choices = field.choices
-    for value, label in unpack_grouped_choices(choices):
-        if len(examples) == arg:
-            examples.append('etc.')
-            break
-        if not value or not label:
-            continue
-        examples.append(label)
-    return ', '.join(examples) or 'None'
-
-
-@register.filter()
 def tzoffset(value):
     """
     Returns the hour offset of a given time zone using the current time.
@@ -164,6 +137,58 @@ def fgcolor(value):
     if not re.match('^[0-9a-f]{6}$', value):
         return ''
     return '#{}'.format(foreground_color(value))
+
+
+@register.filter()
+def divide(x, y):
+    """
+    Return x/y (rounded).
+    """
+    if x is None or y is None:
+        return None
+    return round(x / y)
+
+
+@register.filter()
+def percentage(x, y):
+    """
+    Return x/y as a percentage.
+    """
+    if x is None or y is None:
+        return None
+    return round(x / y * 100)
+
+
+@register.filter()
+def get_docs(model):
+    """
+    Render and return documentation for the specified model.
+    """
+    path = '{}/models/{}/{}.md'.format(
+        settings.DOCS_ROOT,
+        model._meta.app_label,
+        model._meta.model_name
+    )
+    try:
+        with open(path) as docfile:
+            content = docfile.read()
+    except FileNotFoundError:
+        return "Unable to load documentation, file not found: {}".format(path)
+    except IOError:
+        return "Unable to load documentation, error reading file: {}".format(path)
+
+    # Render Markdown with the admonition extension
+    content = markdown(content, extensions=['admonition', 'fenced_code', 'tables'])
+
+    return mark_safe(content)
+
+
+@register.filter()
+def has_perms(user, permissions_list):
+    """
+    Return True if the user has *all* permissions in the list.
+    """
+    return user.has_perms(permissions_list)
 
 
 #

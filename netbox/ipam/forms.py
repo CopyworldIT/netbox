@@ -1,38 +1,38 @@
 from django import forms
-from django.core.exceptions import MultipleObjectsReturned
 from django.core.validators import MaxValueValidator, MinValueValidator
-from taggit.forms import TagField
 
-from dcim.models import Site, Rack, Device, Interface
-from extras.forms import AddRemoveTagsForm, CustomFieldForm, CustomFieldBulkEditForm, CustomFieldFilterForm
-from tenancy.forms import TenancyForm
+from dcim.models import Device, Interface, Rack, Region, Site
+from extras.forms import (
+    AddRemoveTagsForm, CustomFieldBulkEditForm, CustomFieldModelCSVForm, CustomFieldModelForm, CustomFieldFilterForm,
+    TagField,
+)
+from tenancy.forms import TenancyFilterForm, TenancyForm
 from tenancy.models import Tenant
 from utilities.forms import (
-    add_blank_choice, APISelect, APISelectMultiple, BootstrapMixin, BulkEditNullBooleanSelect, ChainedModelChoiceField,
-    CSVChoiceField, ExpandableIPAddressField, FilterChoiceField, FlexibleModelChoiceField, ReturnURLForm, SlugField,
-    StaticSelect2, StaticSelect2Multiple, BOOLEAN_WITH_BLANK_CHOICES
+    add_blank_choice, APISelect, APISelectMultiple, BootstrapMixin, BulkEditNullBooleanSelect, CSVChoiceField,
+    CSVModelChoiceField, CSVModelForm, DatePicker, DynamicModelChoiceField, DynamicModelMultipleChoiceField,
+    ExpandableIPAddressField, ReturnURLForm, SlugField, StaticSelect2, StaticSelect2Multiple, TagFilterField,
+    BOOLEAN_WITH_BLANK_CHOICES,
 )
 from virtualization.models import VirtualMachine
-from .constants import (
-    IP_PROTOCOL_CHOICES, IPADDRESS_ROLE_CHOICES, IPADDRESS_STATUS_CHOICES, PREFIX_STATUS_CHOICES, VLAN_STATUS_CHOICES,
-)
+from .choices import *
+from .constants import *
 from .models import Aggregate, IPAddress, Prefix, RIR, Role, Service, VLAN, VLANGroup, VRF
 
-IP_FAMILY_CHOICES = [
-    ('', 'All'),
-    (4, 'IPv4'),
-    (6, 'IPv6'),
-]
+PREFIX_MASK_LENGTH_CHOICES = add_blank_choice([
+    (i, i) for i in range(PREFIX_LENGTH_MIN, PREFIX_LENGTH_MAX + 1)
+])
 
-PREFIX_MASK_LENGTH_CHOICES = add_blank_choice([(i, i) for i in range(1, 128)])
-IPADDRESS_MASK_LENGTH_CHOICES = add_blank_choice([(i, i) for i in range(1, 129)])
+IPADDRESS_MASK_LENGTH_CHOICES = add_blank_choice([
+    (i, i) for i in range(IPADDRESS_MASK_LENGTH_MIN, IPADDRESS_MASK_LENGTH_MAX + 1)
+])
 
 
 #
 # VRFs
 #
 
-class VRFForm(BootstrapMixin, TenancyForm, CustomFieldForm):
+class VRFForm(BootstrapMixin, TenancyForm, CustomFieldModelForm):
     tags = TagField(
         required=False
     )
@@ -50,23 +50,17 @@ class VRFForm(BootstrapMixin, TenancyForm, CustomFieldForm):
         }
 
 
-class VRFCSVForm(forms.ModelForm):
-    tenant = forms.ModelChoiceField(
+class VRFCSVForm(CustomFieldModelCSVForm):
+    tenant = CSVModelChoiceField(
         queryset=Tenant.objects.all(),
         required=False,
         to_field_name='name',
-        help_text='Name of assigned tenant',
-        error_messages={
-            'invalid_choice': 'Tenant not found.',
-        }
+        help_text='Assigned tenant'
     )
 
     class Meta:
         model = VRF
         fields = VRF.csv_headers
-        help_texts = {
-            'name': 'VRF name',
-        }
 
 
 class VRFBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomFieldBulkEditForm):
@@ -74,12 +68,9 @@ class VRFBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomFieldBulkEditForm
         queryset=VRF.objects.all(),
         widget=forms.MultipleHiddenInput()
     )
-    tenant = forms.ModelChoiceField(
+    tenant = DynamicModelChoiceField(
         queryset=Tenant.objects.all(),
-        required=False,
-        widget=APISelect(
-            api_url="/api/tenancy/tenants/"
-        )
+        required=False
     )
     enforce_unique = forms.NullBooleanField(
         required=False,
@@ -97,22 +88,14 @@ class VRFBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomFieldBulkEditForm
         ]
 
 
-class VRFFilterForm(BootstrapMixin, CustomFieldFilterForm):
+class VRFFilterForm(BootstrapMixin, TenancyFilterForm, CustomFieldFilterForm):
     model = VRF
+    field_order = ['q', 'tenant_group', 'tenant']
     q = forms.CharField(
         required=False,
         label='Search'
     )
-    tenant = FilterChoiceField(
-        queryset=Tenant.objects.all(),
-        to_field_name='slug',
-        null_label='-- None --',
-        widget=APISelectMultiple(
-            api_url="/api/tenancy/tenants/",
-            value_field="slug",
-            null_option=True,
-        )
-    )
+    tag = TagFilterField(model)
 
 
 #
@@ -125,11 +108,11 @@ class RIRForm(BootstrapMixin, forms.ModelForm):
     class Meta:
         model = RIR
         fields = [
-            'name', 'slug', 'is_private',
+            'name', 'slug', 'is_private', 'description',
         ]
 
 
-class RIRCSVForm(forms.ModelForm):
+class RIRCSVForm(CSVModelForm):
     slug = SlugField()
 
     class Meta:
@@ -154,7 +137,10 @@ class RIRFilterForm(BootstrapMixin, forms.Form):
 # Aggregates
 #
 
-class AggregateForm(BootstrapMixin, CustomFieldForm):
+class AggregateForm(BootstrapMixin, CustomFieldModelForm):
+    rir = DynamicModelChoiceField(
+        queryset=RIR.objects.all()
+    )
     tags = TagField(
         required=False
     )
@@ -167,23 +153,17 @@ class AggregateForm(BootstrapMixin, CustomFieldForm):
         help_texts = {
             'prefix': "IPv4 or IPv6 network",
             'rir': "Regional Internet Registry responsible for this prefix",
-            'date_added': "Format: YYYY-MM-DD",
         }
         widgets = {
-            'rir': APISelect(
-                api_url="/api/ipam/rirs/"
-            )
+            'date_added': DatePicker(),
         }
 
 
-class AggregateCSVForm(forms.ModelForm):
-    rir = forms.ModelChoiceField(
+class AggregateCSVForm(CustomFieldModelCSVForm):
+    rir = CSVModelChoiceField(
         queryset=RIR.objects.all(),
         to_field_name='name',
-        help_text='Name of parent RIR',
-        error_messages={
-            'invalid_choice': 'RIR not found.',
-        }
+        help_text='Assigned RIR'
     )
 
     class Meta:
@@ -196,13 +176,10 @@ class AggregateBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomFieldBulkEd
         queryset=Aggregate.objects.all(),
         widget=forms.MultipleHiddenInput()
     )
-    rir = forms.ModelChoiceField(
+    rir = DynamicModelChoiceField(
         queryset=RIR.objects.all(),
         required=False,
-        label='RIR',
-        widget=APISelect(
-            api_url="/api/ipam/rirs/"
-        )
+        label='RIR'
     )
     date_added = forms.DateField(
         required=False
@@ -216,6 +193,9 @@ class AggregateBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomFieldBulkEd
         nullable_fields = [
             'date_added', 'description',
         ]
+        widgets = {
+            'date_added': DatePicker(),
+        }
 
 
 class AggregateFilterForm(BootstrapMixin, CustomFieldFilterForm):
@@ -226,19 +206,20 @@ class AggregateFilterForm(BootstrapMixin, CustomFieldFilterForm):
     )
     family = forms.ChoiceField(
         required=False,
-        choices=IP_FAMILY_CHOICES,
+        choices=add_blank_choice(IPAddressFamilyChoices),
         label='Address family',
         widget=StaticSelect2()
     )
-    rir = FilterChoiceField(
+    rir = DynamicModelMultipleChoiceField(
         queryset=RIR.objects.all(),
         to_field_name='slug',
+        required=False,
         label='RIR',
         widget=APISelectMultiple(
-            api_url="/api/ipam/rirs/",
             value_field="slug",
         )
     )
+    tag = TagFilterField(model)
 
 
 #
@@ -251,32 +232,32 @@ class RoleForm(BootstrapMixin, forms.ModelForm):
     class Meta:
         model = Role
         fields = [
-            'name', 'slug',
+            'name', 'slug', 'weight', 'description',
         ]
 
 
-class RoleCSVForm(forms.ModelForm):
+class RoleCSVForm(CSVModelForm):
     slug = SlugField()
 
     class Meta:
         model = Role
         fields = Role.csv_headers
-        help_texts = {
-            'name': 'Role name',
-        }
 
 
 #
 # Prefixes
 #
 
-class PrefixForm(BootstrapMixin, TenancyForm, CustomFieldForm):
-    site = forms.ModelChoiceField(
+class PrefixForm(BootstrapMixin, TenancyForm, CustomFieldModelForm):
+    vrf = DynamicModelChoiceField(
+        queryset=VRF.objects.all(),
+        required=False,
+        label='VRF'
+    )
+    site = DynamicModelChoiceField(
         queryset=Site.objects.all(),
         required=False,
-        label='Site',
         widget=APISelect(
-            api_url="/api/dcim/sites/",
             filter_for={
                 'vlan_group': 'site_id',
                 'vlan': 'site_id',
@@ -286,15 +267,11 @@ class PrefixForm(BootstrapMixin, TenancyForm, CustomFieldForm):
             }
         )
     )
-    vlan_group = ChainedModelChoiceField(
+    vlan_group = DynamicModelChoiceField(
         queryset=VLANGroup.objects.all(),
-        chains=(
-            ('site', 'site'),
-        ),
         required=False,
         label='VLAN group',
         widget=APISelect(
-            api_url='/api/ipam/vlan-groups/',
             filter_for={
                 'vlan': 'group_id'
             },
@@ -303,18 +280,17 @@ class PrefixForm(BootstrapMixin, TenancyForm, CustomFieldForm):
             }
         )
     )
-    vlan = ChainedModelChoiceField(
+    vlan = DynamicModelChoiceField(
         queryset=VLAN.objects.all(),
-        chains=(
-            ('site', 'site'),
-            ('group', 'vlan_group'),
-        ),
         required=False,
         label='VLAN',
         widget=APISelect(
-            api_url='/api/ipam/vlans/',
             display_field='display_name'
         )
+    )
+    role = DynamicModelChoiceField(
+        queryset=Role.objects.all(),
+        required=False
     )
     tags = TagField(required=False)
 
@@ -325,13 +301,7 @@ class PrefixForm(BootstrapMixin, TenancyForm, CustomFieldForm):
             'tags',
         ]
         widgets = {
-            'vrf': APISelect(
-                api_url="/api/ipam/vrfs/"
-            ),
             'status': StaticSelect2(),
-            'role': APISelect(
-                api_url="/api/ipam/roles/"
-            )
         }
 
     def __init__(self, *args, **kwargs):
@@ -348,93 +318,63 @@ class PrefixForm(BootstrapMixin, TenancyForm, CustomFieldForm):
         self.fields['vrf'].empty_label = 'Global'
 
 
-class PrefixCSVForm(forms.ModelForm):
-    vrf = forms.ModelChoiceField(
+class PrefixCSVForm(CustomFieldModelCSVForm):
+    vrf = CSVModelChoiceField(
         queryset=VRF.objects.all(),
+        to_field_name='name',
         required=False,
-        to_field_name='rd',
-        help_text='Route distinguisher of parent VRF',
-        error_messages={
-            'invalid_choice': 'VRF not found.',
-        }
+        help_text='Assigned VRF'
     )
-    tenant = forms.ModelChoiceField(
+    tenant = CSVModelChoiceField(
         queryset=Tenant.objects.all(),
         required=False,
         to_field_name='name',
-        help_text='Name of assigned tenant',
-        error_messages={
-            'invalid_choice': 'Tenant not found.',
-        }
+        help_text='Assigned tenant'
     )
-    site = forms.ModelChoiceField(
+    site = CSVModelChoiceField(
         queryset=Site.objects.all(),
         required=False,
         to_field_name='name',
-        help_text='Name of parent site',
-        error_messages={
-            'invalid_choice': 'Site not found.',
-        }
+        help_text='Assigned site'
     )
-    vlan_group = forms.CharField(
-        help_text='Group name of assigned VLAN',
-        required=False
+    vlan_group = CSVModelChoiceField(
+        queryset=VLANGroup.objects.all(),
+        required=False,
+        to_field_name='name',
+        help_text="VLAN's group (if any)"
     )
-    vlan_vid = forms.IntegerField(
-        help_text='Numeric ID of assigned VLAN',
-        required=False
+    vlan = CSVModelChoiceField(
+        queryset=VLAN.objects.all(),
+        required=False,
+        to_field_name='vid',
+        help_text="Assigned VLAN"
     )
     status = CSVChoiceField(
-        choices=PREFIX_STATUS_CHOICES,
+        choices=PrefixStatusChoices,
         help_text='Operational status'
     )
-    role = forms.ModelChoiceField(
+    role = CSVModelChoiceField(
         queryset=Role.objects.all(),
         required=False,
         to_field_name='name',
-        help_text='Functional role',
-        error_messages={
-            'invalid_choice': 'Invalid role.',
-        }
+        help_text='Functional role'
     )
 
     class Meta:
         model = Prefix
         fields = Prefix.csv_headers
 
-    def clean(self):
+    def __init__(self, data=None, *args, **kwargs):
+        super().__init__(data, *args, **kwargs)
 
-        super().clean()
+        if data:
 
-        site = self.cleaned_data.get('site')
-        vlan_group = self.cleaned_data.get('vlan_group')
-        vlan_vid = self.cleaned_data.get('vlan_vid')
-
-        # Validate VLAN
-        if vlan_group and vlan_vid:
-            try:
-                self.instance.vlan = VLAN.objects.get(site=site, group__name=vlan_group, vid=vlan_vid)
-            except VLAN.DoesNotExist:
-                if site:
-                    raise forms.ValidationError("VLAN {} not found in site {} group {}".format(
-                        vlan_vid, site, vlan_group
-                    ))
-                else:
-                    raise forms.ValidationError("Global VLAN {} not found in group {}".format(vlan_vid, vlan_group))
-            except MultipleObjectsReturned:
-                raise forms.ValidationError(
-                    "Multiple VLANs with VID {} found in group {}".format(vlan_vid, vlan_group)
-                )
-        elif vlan_vid:
-            try:
-                self.instance.vlan = VLAN.objects.get(site=site, group__isnull=True, vid=vlan_vid)
-            except VLAN.DoesNotExist:
-                if site:
-                    raise forms.ValidationError("VLAN {} not found in site {}".format(vlan_vid, site))
-                else:
-                    raise forms.ValidationError("Global VLAN {} not found".format(vlan_vid))
-            except MultipleObjectsReturned:
-                raise forms.ValidationError("Multiple VLANs with VID {} found".format(vlan_vid))
+            # Limit vlan queryset by assigned site and group
+            params = {
+                f"site__{self.fields['site'].to_field_name}": data.get('site'),
+                f"group__{self.fields['vlan_group'].to_field_name}": data.get('vlan_group'),
+            }
+            self.fields['vlan'].queryset = self.fields['vlan'].queryset.filter(**params)
 
 
 class PrefixBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomFieldBulkEditForm):
@@ -442,44 +382,32 @@ class PrefixBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomFieldBulkEditF
         queryset=Prefix.objects.all(),
         widget=forms.MultipleHiddenInput()
     )
-    site = forms.ModelChoiceField(
+    site = DynamicModelChoiceField(
         queryset=Site.objects.all(),
-        required=False,
-        widget=APISelect(
-            api_url="/api/dcim/sites/"
-        )
-    )
-    vrf = forms.ModelChoiceField(
-        queryset=VRF.objects.all(),
-        required=False,
-        label='VRF',
-        widget=APISelect(
-            api_url="/api/ipam/vrfs/"
-        )
-    )
-    prefix_length = forms.IntegerField(
-        min_value=1,
-        max_value=127,
         required=False
     )
-    tenant = forms.ModelChoiceField(
-        queryset=Tenant.objects.all(),
+    vrf = DynamicModelChoiceField(
+        queryset=VRF.objects.all(),
         required=False,
-        widget=APISelect(
-            api_url="/api/tenancy/tenants/"
-        )
+        label='VRF'
+    )
+    prefix_length = forms.IntegerField(
+        min_value=PREFIX_LENGTH_MIN,
+        max_value=PREFIX_LENGTH_MAX,
+        required=False
+    )
+    tenant = DynamicModelChoiceField(
+        queryset=Tenant.objects.all(),
+        required=False
     )
     status = forms.ChoiceField(
-        choices=add_blank_choice(PREFIX_STATUS_CHOICES),
+        choices=add_blank_choice(PrefixStatusChoices),
         required=False,
         widget=StaticSelect2()
     )
-    role = forms.ModelChoiceField(
+    role = DynamicModelChoiceField(
         queryset=Role.objects.all(),
-        required=False,
-        widget=APISelect(
-            api_url="/api/ipam/roles/"
-        )
+        required=False
     )
     is_pool = forms.NullBooleanField(
         required=False,
@@ -497,8 +425,12 @@ class PrefixBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomFieldBulkEditF
         ]
 
 
-class PrefixFilterForm(BootstrapMixin, CustomFieldFilterForm):
+class PrefixFilterForm(BootstrapMixin, TenancyFilterForm, CustomFieldFilterForm):
     model = Prefix
+    field_order = [
+        'q', 'within_include', 'family', 'mask_length', 'vrf_id', 'status', 'region', 'site', 'role', 'tenant_group',
+        'tenant', 'is_pool', 'expand',
+    ]
     q = forms.CharField(
         required=False,
         label='Search'
@@ -514,7 +446,7 @@ class PrefixFilterForm(BootstrapMixin, CustomFieldFilterForm):
     )
     family = forms.ChoiceField(
         required=False,
-        choices=IP_FAMILY_CHOICES,
+        choices=add_blank_choice(IPAddressFamilyChoices),
         label='Address family',
         widget=StaticSelect2()
     )
@@ -524,48 +456,44 @@ class PrefixFilterForm(BootstrapMixin, CustomFieldFilterForm):
         label='Mask length',
         widget=StaticSelect2()
     )
-    vrf = FilterChoiceField(
+    vrf_id = DynamicModelMultipleChoiceField(
         queryset=VRF.objects.all(),
-        to_field_name='rd',
+        required=False,
         label='VRF',
-        null_label='-- Global --',
         widget=APISelectMultiple(
-            api_url="/api/ipam/vrfs/",
-            value_field="slug",
-            null_option=True,
-        )
-    )
-    tenant = FilterChoiceField(
-        queryset=Tenant.objects.all(),
-        to_field_name='slug',
-        null_label='-- None --',
-        widget=APISelectMultiple(
-            api_url="/api/tenancy/tenants/",
-            value_field="slug",
             null_option=True,
         )
     )
     status = forms.MultipleChoiceField(
-        choices=PREFIX_STATUS_CHOICES,
+        choices=PrefixStatusChoices,
         required=False,
         widget=StaticSelect2Multiple()
     )
-    site = FilterChoiceField(
+    region = DynamicModelMultipleChoiceField(
+        queryset=Region.objects.all(),
+        to_field_name='slug',
+        required=False,
+        widget=APISelectMultiple(
+            value_field="slug",
+            filter_for={
+                'site': 'region'
+            }
+        )
+    )
+    site = DynamicModelMultipleChoiceField(
         queryset=Site.objects.all(),
         to_field_name='slug',
-        null_label='-- None --',
+        required=False,
         widget=APISelectMultiple(
-            api_url="/api/dcim/sites/",
             value_field="slug",
             null_option=True,
         )
     )
-    role = FilterChoiceField(
+    role = DynamicModelMultipleChoiceField(
         queryset=Role.objects.all(),
         to_field_name='slug',
-        null_label='-- None --',
+        required=False,
         widget=APISelectMultiple(
-            api_url="/api/ipam/roles/",
             value_field="slug",
             null_option=True,
         )
@@ -581,38 +509,39 @@ class PrefixFilterForm(BootstrapMixin, CustomFieldFilterForm):
         required=False,
         label='Expand prefix hierarchy'
     )
+    tag = TagFilterField(model)
 
 
 #
 # IP addresses
 #
 
-class IPAddressForm(BootstrapMixin, TenancyForm, ReturnURLForm, CustomFieldForm):
+class IPAddressForm(BootstrapMixin, TenancyForm, ReturnURLForm, CustomFieldModelForm):
     interface = forms.ModelChoiceField(
         queryset=Interface.objects.all(),
         required=False
     )
-    nat_site = forms.ModelChoiceField(
+    vrf = DynamicModelChoiceField(
+        queryset=VRF.objects.all(),
+        required=False,
+        label='VRF'
+    )
+    nat_site = DynamicModelChoiceField(
         queryset=Site.objects.all(),
         required=False,
         label='Site',
         widget=APISelect(
-            api_url="/api/dcim/sites/",
             filter_for={
                 'nat_rack': 'site_id',
                 'nat_device': 'site_id'
             }
         )
     )
-    nat_rack = ChainedModelChoiceField(
+    nat_rack = DynamicModelChoiceField(
         queryset=Rack.objects.all(),
-        chains=(
-            ('site', 'nat_site'),
-        ),
         required=False,
         label='Rack',
         widget=APISelect(
-            api_url='/api/dcim/racks/',
             display_field='display_name',
             filter_for={
                 'nat_device': 'rack_id'
@@ -622,31 +551,32 @@ class IPAddressForm(BootstrapMixin, TenancyForm, ReturnURLForm, CustomFieldForm)
             }
         )
     )
-    nat_device = ChainedModelChoiceField(
+    nat_device = DynamicModelChoiceField(
         queryset=Device.objects.all(),
-        chains=(
-            ('site', 'nat_site'),
-            ('rack', 'nat_rack'),
-        ),
         required=False,
         label='Device',
         widget=APISelect(
-            api_url='/api/dcim/devices/',
             display_field='display_name',
             filter_for={
                 'nat_inside': 'device_id'
             }
         )
     )
-    nat_inside = ChainedModelChoiceField(
+    nat_vrf = DynamicModelChoiceField(
+        queryset=VRF.objects.all(),
+        required=False,
+        label='VRF',
+        widget=APISelect(
+            filter_for={
+                'nat_inside': 'vrf_id'
+            }
+        )
+    )
+    nat_inside = DynamicModelChoiceField(
         queryset=IPAddress.objects.all(),
-        chains=(
-            ('interface__device', 'nat_device'),
-        ),
         required=False,
         label='IP Address',
         widget=APISelect(
-            api_url='/api/ipam/ip-addresses/',
             display_field='address'
         )
     )
@@ -661,15 +591,12 @@ class IPAddressForm(BootstrapMixin, TenancyForm, ReturnURLForm, CustomFieldForm)
     class Meta:
         model = IPAddress
         fields = [
-            'address', 'vrf', 'status', 'role', 'description', 'interface', 'primary_for_parent', 'nat_site',
-            'nat_rack', 'nat_inside', 'tenant_group', 'tenant', 'tags',
+            'address', 'vrf', 'status', 'role', 'dns_name', 'description', 'interface', 'primary_for_parent',
+            'nat_site', 'nat_rack', 'nat_inside', 'tenant_group', 'tenant', 'tags',
         ]
         widgets = {
             'status': StaticSelect2(),
             'role': StaticSelect2(),
-            'vrf': APISelect(
-                api_url="/api/ipam/vrfs/"
-            )
         }
 
     def __init__(self, *args, **kwargs):
@@ -691,7 +618,12 @@ class IPAddressForm(BootstrapMixin, TenancyForm, ReturnURLForm, CustomFieldForm)
         if self.instance and self.instance.interface:
             self.fields['interface'].queryset = Interface.objects.filter(
                 device=self.instance.interface.device, virtual_machine=self.instance.interface.virtual_machine
-            )
+            ).prefetch_related(
+                'device__primary_ip4',
+                'device__primary_ip6',
+                'virtual_machine__primary_ip4',
+                'virtual_machine__primary_ip6',
+            )  # We prefetch the primary address fields to ensure cache invalidation does not balk on the save()
         else:
             self.fields['interface'].choices = []
 
@@ -743,19 +675,24 @@ class IPAddressBulkCreateForm(BootstrapMixin, forms.Form):
     )
 
 
-class IPAddressBulkAddForm(BootstrapMixin, TenancyForm, CustomFieldForm):
+class IPAddressBulkAddForm(BootstrapMixin, TenancyForm, CustomFieldModelForm):
+    vrf = DynamicModelChoiceField(
+        queryset=VRF.objects.all(),
+        required=False,
+        label='VRF'
+    )
+    tags = TagField(
+        required=False
+    )
 
     class Meta:
         model = IPAddress
         fields = [
-            'address', 'vrf', 'status', 'role', 'description', 'tenant_group', 'tenant',
+            'address', 'vrf', 'status', 'role', 'dns_name', 'description', 'tenant_group', 'tenant', 'tags',
         ]
         widgets = {
             'status': StaticSelect2(),
             'role': StaticSelect2(),
-            'vrf': APISelect(
-                api_url="/api/ipam/vrfs/"
-            )
         }
 
     def __init__(self, *args, **kwargs):
@@ -763,55 +700,45 @@ class IPAddressBulkAddForm(BootstrapMixin, TenancyForm, CustomFieldForm):
         self.fields['vrf'].empty_label = 'Global'
 
 
-class IPAddressCSVForm(forms.ModelForm):
-    vrf = forms.ModelChoiceField(
+class IPAddressCSVForm(CustomFieldModelCSVForm):
+    vrf = CSVModelChoiceField(
         queryset=VRF.objects.all(),
+        to_field_name='name',
         required=False,
-        to_field_name='rd',
-        help_text='Route distinguisher of the assigned VRF',
-        error_messages={
-            'invalid_choice': 'VRF not found.',
-        }
+        help_text='Assigned VRF'
     )
-    tenant = forms.ModelChoiceField(
+    tenant = CSVModelChoiceField(
         queryset=Tenant.objects.all(),
         to_field_name='name',
         required=False,
-        help_text='Name of the assigned tenant',
-        error_messages={
-            'invalid_choice': 'Tenant not found.',
-        }
+        help_text='Assigned tenant'
     )
     status = CSVChoiceField(
-        choices=IPADDRESS_STATUS_CHOICES,
+        choices=IPAddressStatusChoices,
         help_text='Operational status'
     )
     role = CSVChoiceField(
-        choices=IPADDRESS_ROLE_CHOICES,
+        choices=IPAddressRoleChoices,
         required=False,
         help_text='Functional role'
     )
-    device = FlexibleModelChoiceField(
+    device = CSVModelChoiceField(
         queryset=Device.objects.all(),
         required=False,
         to_field_name='name',
-        help_text='Name or ID of assigned device',
-        error_messages={
-            'invalid_choice': 'Device not found.',
-        }
+        help_text='Parent device of assigned interface (if any)'
     )
-    virtual_machine = forms.ModelChoiceField(
+    virtual_machine = CSVModelChoiceField(
         queryset=VirtualMachine.objects.all(),
         required=False,
         to_field_name='name',
-        help_text='Name of assigned virtual machine',
-        error_messages={
-            'invalid_choice': 'Virtual machine not found.',
-        }
+        help_text='Parent VM of assigned interface (if any)'
     )
-    interface_name = forms.CharField(
-        help_text='Name of assigned interface',
-        required=False
+    interface = CSVModelChoiceField(
+        queryset=Interface.objects.all(),
+        required=False,
+        to_field_name='name',
+        help_text='Assigned interface'
     )
     is_primary = forms.BooleanField(
         help_text='Make this the primary IP for the assigned device',
@@ -822,55 +749,39 @@ class IPAddressCSVForm(forms.ModelForm):
         model = IPAddress
         fields = IPAddress.csv_headers
 
+    def __init__(self, data=None, *args, **kwargs):
+        super().__init__(data, *args, **kwargs)
+
+        if data:
+
+            # Limit interface queryset by assigned device or virtual machine
+            if data.get('device'):
+                params = {
+                    f"device__{self.fields['device'].to_field_name}": data.get('device')
+                }
+            elif data.get('virtual_machine'):
+                params = {
+                    f"virtual_machine__{self.fields['virtual_machine'].to_field_name}": data.get('virtual_machine')
+                }
+            else:
+                params = {
+                    'device': None,
+                    'virtual_machine': None,
+                }
+            self.fields['interface'].queryset = self.fields['interface'].queryset.filter(**params)
+
     def clean(self):
         super().clean()
 
         device = self.cleaned_data.get('device')
         virtual_machine = self.cleaned_data.get('virtual_machine')
-        interface_name = self.cleaned_data.get('interface_name')
         is_primary = self.cleaned_data.get('is_primary')
-
-        # Validate interface
-        if interface_name and device:
-            try:
-                self.instance.interface = Interface.objects.get(device=device, name=interface_name)
-            except Interface.DoesNotExist:
-                raise forms.ValidationError("Invalid interface {} for device {}".format(
-                    interface_name, device
-                ))
-        elif interface_name and virtual_machine:
-            try:
-                self.instance.interface = Interface.objects.get(virtual_machine=virtual_machine, name=interface_name)
-            except Interface.DoesNotExist:
-                raise forms.ValidationError("Invalid interface {} for virtual machine {}".format(
-                    interface_name, virtual_machine
-                ))
-        elif interface_name:
-            raise forms.ValidationError("Interface given ({}) but parent device/virtual machine not specified".format(
-                interface_name
-            ))
-        elif device:
-            raise forms.ValidationError("Device specified ({}) but interface missing".format(device))
-        elif virtual_machine:
-            raise forms.ValidationError("Virtual machine specified ({}) but interface missing".format(virtual_machine))
 
         # Validate is_primary
         if is_primary and not device and not virtual_machine:
             raise forms.ValidationError("No device or virtual machine specified; cannot set as primary IP")
 
     def save(self, *args, **kwargs):
-
-        # Set interface
-        if self.cleaned_data['device'] and self.cleaned_data['interface_name']:
-            self.instance.interface = Interface.objects.get(
-                device=self.cleaned_data['device'],
-                name=self.cleaned_data['interface_name']
-            )
-        elif self.cleaned_data['virtual_machine'] and self.cleaned_data['interface_name']:
-            self.instance.interface = Interface.objects.get(
-                virtual_machine=self.cleaned_data['virtual_machine'],
-                name=self.cleaned_data['interface_name']
-            )
 
         ipaddress = super().save(*args, **kwargs)
 
@@ -891,63 +802,64 @@ class IPAddressBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomFieldBulkEd
         queryset=IPAddress.objects.all(),
         widget=forms.MultipleHiddenInput()
     )
-    vrf = forms.ModelChoiceField(
+    vrf = DynamicModelChoiceField(
         queryset=VRF.objects.all(),
         required=False,
-        label='VRF',
-        widget=APISelect(
-            api_url="/api/ipam/vrfs/"
-        )
+        label='VRF'
     )
     mask_length = forms.IntegerField(
-        min_value=1,
-        max_value=128,
+        min_value=IPADDRESS_MASK_LENGTH_MIN,
+        max_value=IPADDRESS_MASK_LENGTH_MAX,
         required=False
     )
-    tenant = forms.ModelChoiceField(
+    tenant = DynamicModelChoiceField(
         queryset=Tenant.objects.all(),
-        required=False,
-        widget=APISelect(
-            api_url="/api/tenancy/tenants/"
-        )
+        required=False
     )
     status = forms.ChoiceField(
-        choices=add_blank_choice(IPADDRESS_STATUS_CHOICES),
+        choices=add_blank_choice(IPAddressStatusChoices),
         required=False,
         widget=StaticSelect2()
     )
     role = forms.ChoiceField(
-        choices=add_blank_choice(IPADDRESS_ROLE_CHOICES),
+        choices=add_blank_choice(IPAddressRoleChoices),
         required=False,
         widget=StaticSelect2()
     )
+    dns_name = forms.CharField(
+        max_length=255,
+        required=False
+    )
     description = forms.CharField(
-        max_length=100, required=False
+        max_length=100,
+        required=False
     )
 
     class Meta:
         nullable_fields = [
-            'vrf', 'role', 'tenant', 'description',
+            'vrf', 'role', 'tenant', 'dns_name', 'description',
         ]
 
 
 class IPAddressAssignForm(BootstrapMixin, forms.Form):
-    vrf = forms.ModelChoiceField(
+    vrf_id = DynamicModelChoiceField(
         queryset=VRF.objects.all(),
         required=False,
         label='VRF',
-        empty_label='Global',
-        widget=APISelect(
-            api_url="/api/ipam/vrfs/"
-        )
+        empty_label='Global'
     )
-    address = forms.CharField(
-        label='IP Address'
+    q = forms.CharField(
+        required=False,
+        label='Search',
     )
 
 
-class IPAddressFilterForm(BootstrapMixin, CustomFieldFilterForm):
+class IPAddressFilterForm(BootstrapMixin, TenancyFilterForm, CustomFieldFilterForm):
     model = IPAddress
+    field_order = [
+        'q', 'parent', 'family', 'mask_length', 'vrf_id', 'status', 'role', 'assigned_to_interface', 'tenant_group',
+        'tenant',
+    ]
     q = forms.CharField(
         required=False,
         label='Search'
@@ -963,7 +875,7 @@ class IPAddressFilterForm(BootstrapMixin, CustomFieldFilterForm):
     )
     family = forms.ChoiceField(
         required=False,
-        choices=IP_FAMILY_CHOICES,
+        choices=add_blank_choice(IPAddressFamilyChoices),
         label='Address family',
         widget=StaticSelect2()
     )
@@ -973,37 +885,32 @@ class IPAddressFilterForm(BootstrapMixin, CustomFieldFilterForm):
         label='Mask length',
         widget=StaticSelect2()
     )
-    vrf = FilterChoiceField(
+    vrf_id = DynamicModelMultipleChoiceField(
         queryset=VRF.objects.all(),
-        to_field_name='rd',
+        required=False,
         label='VRF',
-        null_label='-- Global --',
         widget=APISelectMultiple(
-            api_url="/api/ipam/vrfs/",
-            value_field="slug",
-            null_option=True,
-        )
-    )
-    tenant = FilterChoiceField(
-        queryset=Tenant.objects.all(),
-        to_field_name='slug',
-        null_label='-- None --',
-        widget=APISelectMultiple(
-            api_url="/api/tenancy/tenants/",
-            value_field="slug",
             null_option=True,
         )
     )
     status = forms.MultipleChoiceField(
-        choices=IPADDRESS_STATUS_CHOICES,
+        choices=IPAddressStatusChoices,
         required=False,
         widget=StaticSelect2Multiple()
     )
     role = forms.MultipleChoiceField(
-        choices=IPADDRESS_ROLE_CHOICES,
+        choices=IPAddressRoleChoices,
         required=False,
         widget=StaticSelect2Multiple()
     )
+    assigned_to_interface = forms.NullBooleanField(
+        required=False,
+        label='Assigned to an interface',
+        widget=StaticSelect2(
+            choices=BOOLEAN_WITH_BLANK_CHOICES
+        )
+    )
+    tag = TagFilterField(model)
 
 
 #
@@ -1011,47 +918,50 @@ class IPAddressFilterForm(BootstrapMixin, CustomFieldFilterForm):
 #
 
 class VLANGroupForm(BootstrapMixin, forms.ModelForm):
+    site = DynamicModelChoiceField(
+        queryset=Site.objects.all(),
+        required=False
+    )
     slug = SlugField()
 
     class Meta:
         model = VLANGroup
         fields = [
-            'site', 'name', 'slug',
+            'site', 'name', 'slug', 'description',
         ]
-        widgets = {
-            'site': APISelect(
-                api_url="/api/dcim/sites/"
-            )
-        }
 
 
-class VLANGroupCSVForm(forms.ModelForm):
-    site = forms.ModelChoiceField(
+class VLANGroupCSVForm(CSVModelForm):
+    site = CSVModelChoiceField(
         queryset=Site.objects.all(),
         required=False,
         to_field_name='name',
-        help_text='Name of parent site',
-        error_messages={
-            'invalid_choice': 'Site not found.',
-        }
+        help_text='Assigned site'
     )
     slug = SlugField()
 
     class Meta:
         model = VLANGroup
         fields = VLANGroup.csv_headers
-        help_texts = {
-            'name': 'Name of VLAN group',
-        }
 
 
 class VLANGroupFilterForm(BootstrapMixin, forms.Form):
-    site = FilterChoiceField(
+    region = DynamicModelMultipleChoiceField(
+        queryset=Region.objects.all(),
+        to_field_name='slug',
+        required=False,
+        widget=APISelectMultiple(
+            value_field="slug",
+            filter_for={
+                'site': 'region',
+            }
+        )
+    )
+    site = DynamicModelMultipleChoiceField(
         queryset=Site.objects.all(),
         to_field_name='slug',
-        null_label='-- Global --',
+        required=False,
         widget=APISelectMultiple(
-            api_url="/api/dcim/sites/",
             value_field="slug",
             null_option=True,
         )
@@ -1062,12 +972,11 @@ class VLANGroupFilterForm(BootstrapMixin, forms.Form):
 # VLANs
 #
 
-class VLANForm(BootstrapMixin, TenancyForm, CustomFieldForm):
-    site = forms.ModelChoiceField(
+class VLANForm(BootstrapMixin, TenancyForm, CustomFieldModelForm):
+    site = DynamicModelChoiceField(
         queryset=Site.objects.all(),
         required=False,
         widget=APISelect(
-            api_url="/api/dcim/sites/",
             filter_for={
                 'group': 'site_id'
             },
@@ -1076,16 +985,13 @@ class VLANForm(BootstrapMixin, TenancyForm, CustomFieldForm):
             }
         )
     )
-    group = ChainedModelChoiceField(
+    group = DynamicModelChoiceField(
         queryset=VLANGroup.objects.all(),
-        chains=(
-            ('site', 'site'),
-        ),
-        required=False,
-        label='Group',
-        widget=APISelect(
-            api_url='/api/ipam/vlan-groups/',
-        )
+        required=False
+    )
+    role = DynamicModelChoiceField(
+        queryset=Role.objects.all(),
+        required=False
     )
     tags = TagField(required=False)
 
@@ -1104,47 +1010,37 @@ class VLANForm(BootstrapMixin, TenancyForm, CustomFieldForm):
         }
         widgets = {
             'status': StaticSelect2(),
-            'role': APISelect(
-                api_url="/api/ipam/roles/"
-            )
         }
 
 
-class VLANCSVForm(forms.ModelForm):
-    site = forms.ModelChoiceField(
+class VLANCSVForm(CustomFieldModelCSVForm):
+    site = CSVModelChoiceField(
         queryset=Site.objects.all(),
         required=False,
         to_field_name='name',
-        help_text='Name of parent site',
-        error_messages={
-            'invalid_choice': 'Site not found.',
-        }
+        help_text='Assigned site'
     )
-    group_name = forms.CharField(
-        help_text='Name of VLAN group',
-        required=False
+    group = CSVModelChoiceField(
+        queryset=VLANGroup.objects.all(),
+        required=False,
+        to_field_name='name',
+        help_text='Assigned VLAN group'
     )
-    tenant = forms.ModelChoiceField(
+    tenant = CSVModelChoiceField(
         queryset=Tenant.objects.all(),
         to_field_name='name',
         required=False,
-        help_text='Name of assigned tenant',
-        error_messages={
-            'invalid_choice': 'Tenant not found.',
-        }
+        help_text='Assigned tenant'
     )
     status = CSVChoiceField(
-        choices=VLAN_STATUS_CHOICES,
+        choices=VLANStatusChoices,
         help_text='Operational status'
     )
-    role = forms.ModelChoiceField(
+    role = CSVModelChoiceField(
         queryset=Role.objects.all(),
         required=False,
         to_field_name='name',
-        help_text='Functional role',
-        error_messages={
-            'invalid_choice': 'Invalid role.',
-        }
+        help_text='Functional role'
     )
 
     class Meta:
@@ -1155,25 +1051,14 @@ class VLANCSVForm(forms.ModelForm):
             'name': 'VLAN name',
         }
 
-    def clean(self):
-        super().clean()
+    def __init__(self, data=None, *args, **kwargs):
+        super().__init__(data, *args, **kwargs)
 
-        site = self.cleaned_data.get('site')
-        group_name = self.cleaned_data.get('group_name')
+        if data:
 
-        # Validate VLAN group
-        if group_name:
-            try:
-                self.instance.group = VLANGroup.objects.get(site=site, name=group_name)
-            except VLANGroup.DoesNotExist:
-                if site:
-                    raise forms.ValidationError(
-                        "VLAN group {} not found for site {}".format(group_name, site)
-                    )
-                else:
-                    raise forms.ValidationError(
-                        "Global VLAN group {} not found".format(group_name)
-                    )
+            # Limit vlan queryset by assigned group
+            params = {f"site__{self.fields['site'].to_field_name}": data.get('site')}
+            self.fields['group'].queryset = self.fields['group'].queryset.filter(**params)
 
 
 class VLANBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomFieldBulkEditForm):
@@ -1181,38 +1066,31 @@ class VLANBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomFieldBulkEditFor
         queryset=VLAN.objects.all(),
         widget=forms.MultipleHiddenInput()
     )
-    site = forms.ModelChoiceField(
+    site = DynamicModelChoiceField(
         queryset=Site.objects.all(),
         required=False,
         widget=APISelect(
-            api_url="/api/dcim/sites/"
+            filter_for={
+                'group': 'site_id'
+            }
         )
     )
-    group = forms.ModelChoiceField(
+    group = DynamicModelChoiceField(
         queryset=VLANGroup.objects.all(),
-        required=False,
-        widget=APISelect(
-            api_url="/api/ipam/vlan-groups/"
-        )
+        required=False
     )
-    tenant = forms.ModelChoiceField(
+    tenant = DynamicModelChoiceField(
         queryset=Tenant.objects.all(),
-        required=False,
-        widget=APISelect(
-            api_url="/api/tenancy/tenants/"
-        )
+        required=False
     )
     status = forms.ChoiceField(
-        choices=add_blank_choice(VLAN_STATUS_CHOICES),
+        choices=add_blank_choice(VLANStatusChoices),
         required=False,
         widget=StaticSelect2()
     )
-    role = forms.ModelChoiceField(
+    role = DynamicModelChoiceField(
         queryset=Role.objects.all(),
-        required=False,
-        widget=APISelect(
-            api_url="/api/ipam/roles/"
-        )
+        required=False
     )
     description = forms.CharField(
         max_length=100,
@@ -1225,63 +1103,68 @@ class VLANBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomFieldBulkEditFor
         ]
 
 
-class VLANFilterForm(BootstrapMixin, CustomFieldFilterForm):
+class VLANFilterForm(BootstrapMixin, TenancyFilterForm, CustomFieldFilterForm):
     model = VLAN
+    field_order = ['q', 'region', 'site', 'group_id', 'status', 'role', 'tenant_group', 'tenant']
     q = forms.CharField(
         required=False,
         label='Search'
     )
-    site = FilterChoiceField(
+    region = DynamicModelMultipleChoiceField(
+        queryset=Region.objects.all(),
+        to_field_name='slug',
+        required=False,
+        widget=APISelectMultiple(
+            value_field="slug",
+            filter_for={
+                'site': 'region',
+                'group_id': 'region'
+            }
+        )
+    )
+    site = DynamicModelMultipleChoiceField(
         queryset=Site.objects.all(),
         to_field_name='slug',
-        null_label='-- Global --',
+        required=False,
         widget=APISelectMultiple(
-            api_url="/api/dcim/sites/",
             value_field="slug",
             null_option=True,
         )
     )
-    group_id = FilterChoiceField(
+    group_id = DynamicModelMultipleChoiceField(
         queryset=VLANGroup.objects.all(),
+        required=False,
         label='VLAN group',
-        null_label='-- None --',
         widget=APISelectMultiple(
-            api_url="/api/ipam/vlan-groups/",
-            null_option=True,
-        )
-    )
-    tenant = FilterChoiceField(
-        queryset=Tenant.objects.all(),
-        to_field_name='slug',
-        null_label='-- None --',
-        widget=APISelectMultiple(
-            api_url="/api/tenancy/tenants/",
-            value_field="slug",
             null_option=True,
         )
     )
     status = forms.MultipleChoiceField(
-        choices=VLAN_STATUS_CHOICES,
+        choices=VLANStatusChoices,
         required=False,
         widget=StaticSelect2Multiple()
     )
-    role = FilterChoiceField(
+    role = DynamicModelMultipleChoiceField(
         queryset=Role.objects.all(),
         to_field_name='slug',
-        null_label='-- None --',
+        required=False,
         widget=APISelectMultiple(
-            api_url="/api/ipam/roles/",
             value_field="slug",
             null_option=True,
         )
     )
+    tag = TagFilterField(model)
 
 
 #
 # Services
 #
 
-class ServiceForm(BootstrapMixin, CustomFieldForm):
+class ServiceForm(BootstrapMixin, CustomFieldModelForm):
+    port = forms.IntegerField(
+        min_value=SERVICE_PORT_MIN,
+        max_value=SERVICE_PORT_MAX
+    )
     tags = TagField(
         required=False
     )
@@ -1324,22 +1207,46 @@ class ServiceFilterForm(BootstrapMixin, CustomFieldFilterForm):
         label='Search'
     )
     protocol = forms.ChoiceField(
-        choices=add_blank_choice(IP_PROTOCOL_CHOICES),
+        choices=add_blank_choice(ServiceProtocolChoices),
         required=False,
         widget=StaticSelect2Multiple()
     )
     port = forms.IntegerField(
         required=False,
     )
+    tag = TagFilterField(model)
 
 
-class ServiceBulkEditForm(BootstrapMixin, CustomFieldBulkEditForm):
+class ServiceCSVForm(CustomFieldModelCSVForm):
+    device = CSVModelChoiceField(
+        queryset=Device.objects.all(),
+        required=False,
+        to_field_name='name',
+        help_text='Required if not assigned to a VM'
+    )
+    virtual_machine = CSVModelChoiceField(
+        queryset=VirtualMachine.objects.all(),
+        required=False,
+        to_field_name='name',
+        help_text='Required if not assigned to a device'
+    )
+    protocol = CSVChoiceField(
+        choices=ServiceProtocolChoices,
+        help_text='IP protocol'
+    )
+
+    class Meta:
+        model = Service
+        fields = Service.csv_headers
+
+
+class ServiceBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomFieldBulkEditForm):
     pk = forms.ModelMultipleChoiceField(
         queryset=Service.objects.all(),
         widget=forms.MultipleHiddenInput()
     )
     protocol = forms.ChoiceField(
-        choices=add_blank_choice(IP_PROTOCOL_CHOICES),
+        choices=add_blank_choice(ServiceProtocolChoices),
         required=False,
         widget=StaticSelect2()
     )
@@ -1357,5 +1264,5 @@ class ServiceBulkEditForm(BootstrapMixin, CustomFieldBulkEditForm):
 
     class Meta:
         nullable_fields = [
-            'site', 'tenant', 'role', 'description',
+            'description',
         ]

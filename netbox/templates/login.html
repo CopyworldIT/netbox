@@ -1,4 +1,4 @@
-{% extends '_base.html' %}
+{% extends 'base.html' %}
 {% load form_helpers %}
 
 {% block content %}
@@ -25,6 +25,7 @@
                 <div class="panel-body">
                     {% csrf_token %}
                     {% if 'next' in request.GET %}<input type="hidden" name="next" value="{{ request.GET.next }}" />{% endif %}
+                    {% if 'next' in request.POST %}<input type="hidden" name="next" value="{{ request.POST.next }}" />{% endif %}
                     {% render_form form %}
                 </div>
                 <div class="panel-footer text-right">

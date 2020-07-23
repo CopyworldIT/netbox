@@ -1,12 +1,17 @@
+import logging
+
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login as auth_login, logout as auth_logout, update_session_auth_hash
-from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
+from django.contrib.auth.models import update_last_login
+from django.contrib.auth.signals import user_logged_in
 from django.http import HttpResponseForbidden, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.decorators import method_decorator
 from django.utils.http import is_safe_url
+from django.views.decorators.debug import sensitive_post_parameters
 from django.views.generic import View
 
 from secrets.forms import UserKeyForm
@@ -21,7 +26,14 @@ from .models import Token
 #
 
 class LoginView(View):
+    """
+    Perform user authentication via the web UI.
+    """
     template_name = 'login.html'
+
+    @method_decorator(sensitive_post_parameters('password'))
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
 
     def get(self, request):
         form = LoginForm(request)
@@ -31,19 +43,34 @@ class LoginView(View):
         })
 
     def post(self, request):
+        logger = logging.getLogger('netbox.auth.login')
         form = LoginForm(request, data=request.POST)
+
         if form.is_valid():
+            logger.debug("Login form validation was successful")
 
             # Determine where to direct user after successful login
-            redirect_to = request.POST.get('next', '')
-            if not is_safe_url(url=redirect_to, allowed_hosts=request.get_host()):
+            redirect_to = request.POST.get('next', reverse('home'))
+            if redirect_to and not is_safe_url(url=redirect_to, allowed_hosts=request.get_host()):
+                logger.warning(f"Ignoring unsafe 'next' URL passed to login form: {redirect_to}")
                 redirect_to = reverse('home')
+
+            # If maintenance mode is enabled, assume the database is read-only, and disable updating the user's
+            # last_login time upon authentication.
+            if settings.MAINTENANCE_MODE:
+                logger.warning("Maintenance mode enabled: disabling update of most recent login time")
+                user_logged_in.disconnect(update_last_login, dispatch_uid='update_last_login')
 
             # Authenticate user
             auth_login(request, form.get_user())
+            logger.info(f"User {request.user} successfully authenticated")
             messages.info(request, "Logged in as {}.".format(request.user))
 
+            logger.debug(f"Redirecting user to {redirect_to}")
             return HttpResponseRedirect(redirect_to)
+
+        else:
+            logger.debug("Login form validation failed")
 
         return render(request, self.template_name, {
             'form': form,
@@ -51,11 +78,16 @@ class LoginView(View):
 
 
 class LogoutView(View):
-
+    """
+    Deauthenticate a web user.
+    """
     def get(self, request):
+        logger = logging.getLogger('netbox.auth.logout')
 
         # Log out the user
+        username = request.user
         auth_logout(request)
+        logger.info(f"User {username} has logged out")
         messages.info(request, "You have logged out.")
 
         # Delete session key cookie (if set) upon logout
@@ -69,8 +101,7 @@ class LogoutView(View):
 # User profiles
 #
 
-@method_decorator(login_required, name='dispatch')
-class ProfileView(View):
+class ProfileView(LoginRequiredMixin, View):
     template_name = 'users/profile.html'
 
     def get(self, request):
@@ -80,11 +111,39 @@ class ProfileView(View):
         })
 
 
-@method_decorator(login_required, name='dispatch')
-class ChangePasswordView(View):
+class UserConfigView(LoginRequiredMixin, View):
+    template_name = 'users/preferences.html'
+
+    def get(self, request):
+
+        return render(request, self.template_name, {
+            'preferences': request.user.config.all(),
+            'active_tab': 'preferences',
+        })
+
+    def post(self, request):
+        userconfig = request.user.config
+        data = userconfig.all()
+
+        # Delete selected preferences
+        for key in request.POST.getlist('pk'):
+            if key in data:
+                userconfig.clear(key)
+        userconfig.save()
+        messages.success(request, "Your preferences have been updated.")
+
+        return redirect('user:preferences')
+
+
+class ChangePasswordView(LoginRequiredMixin, View):
     template_name = 'users/change_password.html'
 
     def get(self, request):
+        # LDAP users cannot change their password here
+        if getattr(request.user, 'ldap_username', None):
+            messages.warning(request, "LDAP-authenticated user credentials cannot be changed within NetBox.")
+            return redirect('user:profile')
+
         form = PasswordChangeForm(user=request.user)
 
         return render(request, self.template_name, {
@@ -106,8 +165,7 @@ class ChangePasswordView(View):
         })
 
 
-@method_decorator(login_required, name='dispatch')
-class UserKeyView(View):
+class UserKeyView(LoginRequiredMixin, View):
     template_name = 'users/userkey.html'
 
     def get(self, request):
@@ -122,10 +180,9 @@ class UserKeyView(View):
         })
 
 
-class UserKeyEditView(View):
+class UserKeyEditView(LoginRequiredMixin, View):
     template_name = 'users/userkey_edit.html'
 
-    @method_decorator(login_required)
     def dispatch(self, request, *args, **kwargs):
         try:
             self.userkey = UserKey.objects.get(user=request.user)
@@ -159,7 +216,6 @@ class UserKeyEditView(View):
         })
 
 
-@method_decorator(login_required, name='dispatch')
 class SessionKeyDeleteView(LoginRequiredMixin, View):
 
     def get(self, request):

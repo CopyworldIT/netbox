@@ -1,14 +1,17 @@
 from Crypto.Cipher import PKCS1_OAEP
 from Crypto.PublicKey import RSA
 from django import forms
-from taggit.forms import TagField
 
 from dcim.models import Device
-from extras.forms import AddRemoveTagsForm, CustomFieldBulkEditForm, CustomFieldFilterForm, CustomFieldForm
-from utilities.forms import (
-    APISelect, APISelectMultiple, BootstrapMixin, FilterChoiceField, FlexibleModelChoiceField, SlugField,
-    StaticSelect2Multiple
+from extras.forms import (
+    AddRemoveTagsForm, CustomFieldBulkEditForm, CustomFieldFilterForm, CustomFieldModelForm, CustomFieldModelCSVForm,
+    TagField,
 )
+from utilities.forms import (
+    APISelectMultiple, BootstrapMixin, CSVModelChoiceField, CSVModelForm, DynamicModelChoiceField,
+    DynamicModelMultipleChoiceField, SlugField, StaticSelect2Multiple, TagFilterField,
+)
+from .constants import *
 from .models import Secret, SecretRole, UserKey
 
 
@@ -16,6 +19,8 @@ def validate_rsa_key(key, is_secret=True):
     """
     Validate the format and type of an RSA key.
     """
+    if key.startswith('ssh-rsa '):
+        raise forms.ValidationError("OpenSSH line format is not supported. Please ensure that your public is in PEM (base64) format.")
     try:
         key = RSA.importKey(key)
     except ValueError:
@@ -42,7 +47,7 @@ class SecretRoleForm(BootstrapMixin, forms.ModelForm):
     class Meta:
         model = SecretRole
         fields = [
-            'name', 'slug', 'users', 'groups',
+            'name', 'slug', 'description', 'users', 'groups',
         ]
         widgets = {
             'users': StaticSelect2Multiple(),
@@ -50,24 +55,24 @@ class SecretRoleForm(BootstrapMixin, forms.ModelForm):
         }
 
 
-class SecretRoleCSVForm(forms.ModelForm):
+class SecretRoleCSVForm(CSVModelForm):
     slug = SlugField()
 
     class Meta:
         model = SecretRole
         fields = SecretRole.csv_headers
-        help_texts = {
-            'name': 'Name of secret role',
-        }
 
 
 #
 # Secrets
 #
 
-class SecretForm(BootstrapMixin, CustomFieldForm):
+class SecretForm(BootstrapMixin, CustomFieldModelForm):
+    device = DynamicModelChoiceField(
+        queryset=Device.objects.all()
+    )
     plaintext = forms.CharField(
-        max_length=65535,
+        max_length=SECRET_PLAINTEXT_MAX_LENGTH,
         required=False,
         label='Plaintext',
         widget=forms.PasswordInput(
@@ -77,10 +82,13 @@ class SecretForm(BootstrapMixin, CustomFieldForm):
         )
     )
     plaintext2 = forms.CharField(
-        max_length=65535,
+        max_length=SECRET_PLAINTEXT_MAX_LENGTH,
         required=False,
         label='Plaintext (verify)',
         widget=forms.PasswordInput()
+    )
+    role = DynamicModelChoiceField(
+        queryset=SecretRole.objects.all()
     )
     tags = TagField(
         required=False
@@ -89,13 +97,8 @@ class SecretForm(BootstrapMixin, CustomFieldForm):
     class Meta:
         model = Secret
         fields = [
-            'role', 'name', 'plaintext', 'plaintext2', 'tags',
+            'device', 'role', 'name', 'plaintext', 'plaintext2', 'tags',
         ]
-        widgets = {
-            'role': APISelect(
-                api_url="/api/secrets/secret-roles/"
-            )
-        }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -112,23 +115,27 @@ class SecretForm(BootstrapMixin, CustomFieldForm):
                 'plaintext2': "The two given plaintext values do not match. Please check your input."
             })
 
+        # Validate uniqueness
+        if Secret.objects.filter(
+            device=self.cleaned_data['device'],
+            role=self.cleaned_data['role'],
+            name=self.cleaned_data['name']
+        ).exists():
+            raise forms.ValidationError(
+                "Each secret assigned to a device must have a unique combination of role and name"
+            )
 
-class SecretCSVForm(forms.ModelForm):
-    device = FlexibleModelChoiceField(
+
+class SecretCSVForm(CustomFieldModelCSVForm):
+    device = CSVModelChoiceField(
         queryset=Device.objects.all(),
         to_field_name='name',
-        help_text='Device name or ID',
-        error_messages={
-            'invalid_choice': 'Device not found.',
-        }
+        help_text='Assigned device'
     )
-    role = forms.ModelChoiceField(
+    role = CSVModelChoiceField(
         queryset=SecretRole.objects.all(),
         to_field_name='name',
-        help_text='Name of assigned role',
-        error_messages={
-            'invalid_choice': 'Invalid secret role.',
-        }
+        help_text='Assigned role'
     )
     plaintext = forms.CharField(
         help_text='Plaintext secret data'
@@ -152,12 +159,9 @@ class SecretBulkEditForm(BootstrapMixin, AddRemoveTagsForm, CustomFieldBulkEditF
         queryset=Secret.objects.all(),
         widget=forms.MultipleHiddenInput()
     )
-    role = forms.ModelChoiceField(
+    role = DynamicModelChoiceField(
         queryset=SecretRole.objects.all(),
-        required=False,
-        widget=APISelect(
-            api_url="/api/secrets/secret-roles/"
-        )
+        required=False
     )
     name = forms.CharField(
         max_length=100,
@@ -176,14 +180,15 @@ class SecretFilterForm(BootstrapMixin, CustomFieldFilterForm):
         required=False,
         label='Search'
     )
-    role = FilterChoiceField(
+    role = DynamicModelMultipleChoiceField(
         queryset=SecretRole.objects.all(),
         to_field_name='slug',
+        required=False,
         widget=APISelectMultiple(
-            api_url="/api/secrets/secret-roles/",
             value_field="slug",
         )
     )
+    tag = TagFilterField(model)
 
 
 #
@@ -198,6 +203,9 @@ class UserKeyForm(BootstrapMixin, forms.ModelForm):
         help_texts = {
             'public_key': "Enter your public RSA key. Keep the private one with you; you'll need it for decryption. "
                           "Please note that passphrase-protected keys are not supported.",
+        }
+        labels = {
+            'public_key': ''
         }
 
     def clean_public_key(self):

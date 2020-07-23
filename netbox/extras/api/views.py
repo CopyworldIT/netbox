@@ -1,31 +1,53 @@
+from collections import OrderedDict
+
 from django.contrib.contenttypes.models import ContentType
 from django.db.models import Count
-from django.http import Http404, HttpResponse
-from django.shortcuts import get_object_or_404
+from django.http import Http404
+from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.viewsets import ReadOnlyModelViewSet, ViewSet
-from taggit.models import Tag
 
 from extras import filters
 from extras.models import (
-    ConfigContext, CustomField, ExportTemplate, Graph, ImageAttachment, ObjectChange, ReportResult, TopologyMap,
+    ConfigContext, CustomFieldChoice, ExportTemplate, Graph, ImageAttachment, ObjectChange, ReportResult, Tag,
 )
 from extras.reports import get_report, get_reports
-from utilities.api import FieldChoicesViewSet, IsAuthenticatedOrLoginNotRequired, ModelViewSet
+from extras.scripts import get_script, get_scripts, run_script
+from utilities.api import IsAuthenticatedOrLoginNotRequired, ModelViewSet
+from utilities.metadata import ContentTypeMetadata
 from . import serializers
 
 
 #
-# Field choices
+# Custom field choices
 #
 
-class ExtrasFieldChoicesViewSet(FieldChoicesViewSet):
-    fields = (
-        (CustomField, ['type']),
-        (Graph, ['type']),
-    )
+class CustomFieldChoicesViewSet(ViewSet):
+    """
+    """
+    permission_classes = [IsAuthenticatedOrLoginNotRequired]
+
+    def __init__(self, *args, **kwargs):
+        super(CustomFieldChoicesViewSet, self).__init__(*args, **kwargs)
+
+        self._fields = OrderedDict()
+
+        for cfc in CustomFieldChoice.objects.all():
+            self._fields.setdefault(cfc.field.name, {})
+            self._fields[cfc.field.name][cfc.value] = cfc.pk
+
+    def list(self, request):
+        return Response(self._fields)
+
+    def retrieve(self, request, pk):
+        if pk not in self._fields:
+            raise Http404
+        return Response(self._fields[pk])
+
+    def get_view_name(self):
+        return "Custom Field choices"
 
 
 #
@@ -67,9 +89,10 @@ class CustomFieldModelViewSet(ModelViewSet):
 #
 
 class GraphViewSet(ModelViewSet):
+    metadata_class = ContentTypeMetadata
     queryset = Graph.objects.all()
     serializer_class = serializers.GraphSerializer
-    filterset_class = filters.GraphFilter
+    filterset_class = filters.GraphFilterSet
 
 
 #
@@ -77,37 +100,10 @@ class GraphViewSet(ModelViewSet):
 #
 
 class ExportTemplateViewSet(ModelViewSet):
+    metadata_class = ContentTypeMetadata
     queryset = ExportTemplate.objects.all()
     serializer_class = serializers.ExportTemplateSerializer
-    filterset_class = filters.ExportTemplateFilter
-
-
-#
-# Topology maps
-#
-
-class TopologyMapViewSet(ModelViewSet):
-    queryset = TopologyMap.objects.select_related('site')
-    serializer_class = serializers.TopologyMapSerializer
-    filterset_class = filters.TopologyMapFilter
-
-    @action(detail=True)
-    def render(self, request, pk):
-
-        tmap = get_object_or_404(TopologyMap, pk=pk)
-        img_format = 'png'
-
-        try:
-            data = tmap.render(img_format=img_format)
-        except Exception as e:
-            return HttpResponse(
-                "There was an error generating the requested graph: %s" % e
-            )
-
-        response = HttpResponse(data, content_type='image/{}'.format(img_format))
-        response['Content-Disposition'] = 'inline; filename="{}.{}"'.format(tmap.slug, img_format)
-
-        return response
+    filterset_class = filters.ExportTemplateFilterSet
 
 
 #
@@ -115,9 +111,11 @@ class TopologyMapViewSet(ModelViewSet):
 #
 
 class TagViewSet(ModelViewSet):
-    queryset = Tag.objects.annotate(tagged_items=Count('taggit_taggeditem_items'))
+    queryset = Tag.objects.annotate(
+        tagged_items=Count('extras_taggeditem_items', distinct=True)
+    )
     serializer_class = serializers.TagSerializer
-    filterset_class = filters.TagFilter
+    filterset_class = filters.TagFilterSet
 
 
 #
@@ -125,6 +123,7 @@ class TagViewSet(ModelViewSet):
 #
 
 class ImageAttachmentViewSet(ModelViewSet):
+    metadata_class = ContentTypeMetadata
     queryset = ImageAttachment.objects.all()
     serializer_class = serializers.ImageAttachmentSerializer
 
@@ -138,7 +137,7 @@ class ConfigContextViewSet(ModelViewSet):
         'regions', 'sites', 'roles', 'platforms', 'tenant_groups', 'tenants',
     )
     serializer_class = serializers.ConfigContextSerializer
-    filterset_class = filters.ConfigContextFilter
+    filterset_class = filters.ConfigContextFilterSet
 
 
 #
@@ -218,6 +217,57 @@ class ReportViewSet(ViewSet):
 
 
 #
+# Scripts
+#
+
+class ScriptViewSet(ViewSet):
+    permission_classes = [IsAuthenticatedOrLoginNotRequired]
+    _ignore_model_permissions = True
+    exclude_from_schema = True
+    lookup_value_regex = '[^/]+'  # Allow dots
+
+    def _get_script(self, pk):
+        module_name, script_name = pk.split('.')
+        script = get_script(module_name, script_name)
+        if script is None:
+            raise Http404
+        return script
+
+    def list(self, request):
+
+        flat_list = []
+        for script_list in get_scripts().values():
+            flat_list.extend(script_list.values())
+
+        serializer = serializers.ScriptSerializer(flat_list, many=True, context={'request': request})
+
+        return Response(serializer.data)
+
+    def retrieve(self, request, pk):
+        script = self._get_script(pk)
+        serializer = serializers.ScriptSerializer(script, context={'request': request})
+
+        return Response(serializer.data)
+
+    def post(self, request, pk):
+        """
+        Run a Script identified as "<module>.<script>".
+        """
+        script = self._get_script(pk)()
+        input_serializer = serializers.ScriptInputSerializer(data=request.data)
+
+        if input_serializer.is_valid():
+            data = input_serializer.data['data']
+            commit = input_serializer.data['commit']
+            script.output, execution_time = run_script(script, data, request, commit)
+            output_serializer = serializers.ScriptOutputSerializer(script)
+
+            return Response(output_serializer.data)
+
+        return Response(input_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+#
 # Change logging
 #
 
@@ -225,6 +275,7 @@ class ObjectChangeViewSet(ReadOnlyModelViewSet):
     """
     Retrieve a list of recent changes.
     """
-    queryset = ObjectChange.objects.select_related('user')
+    metadata_class = ContentTypeMetadata
+    queryset = ObjectChange.objects.prefetch_related('user')
     serializer_class = serializers.ObjectChangeSerializer
-    filterset_class = filters.ObjectChangeFilter
+    filterset_class = filters.ObjectChangeFilterSet

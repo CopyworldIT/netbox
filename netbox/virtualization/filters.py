@@ -1,39 +1,66 @@
 import django_filters
-from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Q
-from netaddr import EUI
-from netaddr.core import AddrFormatError
 
 from dcim.models import DeviceRole, Interface, Platform, Region, Site
-from extras.filters import CustomFieldFilterSet
-from tenancy.models import Tenant
-from utilities.filters import NumericInFilter, TagFilter
-from .constants import VM_STATUS_CHOICES
+from extras.filters import CustomFieldFilterSet, CreatedUpdatedFilterSet, LocalConfigContextFilterSet
+from tenancy.filters import TenancyFilterSet
+from utilities.filters import (
+    BaseFilterSet, MultiValueMACAddressFilter, NameSlugSearchFilterSet, TagFilter,
+    TreeNodeMultipleChoiceFilter,
+)
+from .choices import *
 from .models import Cluster, ClusterGroup, ClusterType, VirtualMachine
 
+__all__ = (
+    'ClusterFilterSet',
+    'ClusterGroupFilterSet',
+    'ClusterTypeFilterSet',
+    'InterfaceFilterSet',
+    'VirtualMachineFilterSet',
+)
 
-class ClusterTypeFilter(django_filters.FilterSet):
+
+class ClusterTypeFilterSet(BaseFilterSet, NameSlugSearchFilterSet):
 
     class Meta:
         model = ClusterType
-        fields = ['name', 'slug']
+        fields = ['id', 'name', 'slug', 'description']
 
 
-class ClusterGroupFilter(django_filters.FilterSet):
+class ClusterGroupFilterSet(BaseFilterSet, NameSlugSearchFilterSet):
 
     class Meta:
         model = ClusterGroup
-        fields = ['name', 'slug']
+        fields = ['id', 'name', 'slug', 'description']
 
 
-class ClusterFilter(CustomFieldFilterSet):
-    id__in = NumericInFilter(
-        field_name='id',
-        lookup_expr='in'
-    )
+class ClusterFilterSet(BaseFilterSet, TenancyFilterSet, CustomFieldFilterSet, CreatedUpdatedFilterSet):
     q = django_filters.CharFilter(
         method='search',
         label='Search',
+    )
+    region_id = TreeNodeMultipleChoiceFilter(
+        queryset=Region.objects.all(),
+        field_name='site__region',
+        lookup_expr='in',
+        label='Region (ID)',
+    )
+    region = TreeNodeMultipleChoiceFilter(
+        queryset=Region.objects.all(),
+        field_name='site__region',
+        lookup_expr='in',
+        to_field_name='slug',
+        label='Region (slug)',
+    )
+    site_id = django_filters.ModelMultipleChoiceFilter(
+        queryset=Site.objects.all(),
+        label='Site (ID)',
+    )
+    site = django_filters.ModelMultipleChoiceFilter(
+        field_name='site__slug',
+        queryset=Site.objects.all(),
+        to_field_name='slug',
+        label='Site (slug)',
     )
     group_id = django_filters.ModelMultipleChoiceFilter(
         queryset=ClusterGroup.objects.all(),
@@ -55,21 +82,11 @@ class ClusterFilter(CustomFieldFilterSet):
         to_field_name='slug',
         label='Cluster type (slug)',
     )
-    site_id = django_filters.ModelMultipleChoiceFilter(
-        queryset=Site.objects.all(),
-        label='Site (ID)',
-    )
-    site = django_filters.ModelMultipleChoiceFilter(
-        field_name='site__slug',
-        queryset=Site.objects.all(),
-        to_field_name='slug',
-        label='Site (slug)',
-    )
     tag = TagFilter()
 
     class Meta:
         model = Cluster
-        fields = ['name']
+        fields = ['id', 'name']
 
     def search(self, queryset, name, value):
         if not value.strip():
@@ -80,17 +97,19 @@ class ClusterFilter(CustomFieldFilterSet):
         )
 
 
-class VirtualMachineFilter(CustomFieldFilterSet):
-    id__in = NumericInFilter(
-        field_name='id',
-        lookup_expr='in'
-    )
+class VirtualMachineFilterSet(
+    BaseFilterSet,
+    LocalConfigContextFilterSet,
+    TenancyFilterSet,
+    CustomFieldFilterSet,
+    CreatedUpdatedFilterSet
+):
     q = django_filters.CharFilter(
         method='search',
         label='Search',
     )
     status = django_filters.MultipleChoiceFilter(
-        choices=VM_STATUS_CHOICES,
+        choices=VirtualMachineStatusChoices,
         null_value=None
     )
     cluster_group_id = django_filters.ModelMultipleChoiceFilter(
@@ -119,14 +138,17 @@ class VirtualMachineFilter(CustomFieldFilterSet):
         queryset=Cluster.objects.all(),
         label='Cluster (ID)',
     )
-    region_id = django_filters.NumberFilter(
-        method='filter_region',
-        field_name='pk',
+    region_id = TreeNodeMultipleChoiceFilter(
+        queryset=Region.objects.all(),
+        field_name='cluster__site__region',
+        lookup_expr='in',
         label='Region (ID)',
     )
-    region = django_filters.CharFilter(
-        method='filter_region',
-        field_name='slug',
+    region = TreeNodeMultipleChoiceFilter(
+        queryset=Region.objects.all(),
+        field_name='cluster__site__region',
+        lookup_expr='in',
+        to_field_name='slug',
         label='Region (slug)',
     )
     site_id = django_filters.ModelMultipleChoiceFilter(
@@ -150,16 +172,6 @@ class VirtualMachineFilter(CustomFieldFilterSet):
         to_field_name='slug',
         label='Role (slug)',
     )
-    tenant_id = django_filters.ModelMultipleChoiceFilter(
-        queryset=Tenant.objects.all(),
-        label='Tenant (ID)',
-    )
-    tenant = django_filters.ModelMultipleChoiceFilter(
-        field_name='tenant__slug',
-        queryset=Tenant.objects.all(),
-        to_field_name='slug',
-        label='Tenant (slug)',
-    )
     platform_id = django_filters.ModelMultipleChoiceFilter(
         queryset=Platform.objects.all(),
         label='Platform (ID)',
@@ -170,11 +182,15 @@ class VirtualMachineFilter(CustomFieldFilterSet):
         to_field_name='slug',
         label='Platform (slug)',
     )
+    mac_address = MultiValueMACAddressFilter(
+        field_name='interfaces__mac_address',
+        label='MAC address',
+    )
     tag = TagFilter()
 
     class Meta:
         model = VirtualMachine
-        fields = ['name', 'cluster']
+        fields = ['id', 'name', 'cluster', 'vcpus', 'memory', 'disk']
 
     def search(self, queryset, name, value):
         if not value.strip():
@@ -184,18 +200,12 @@ class VirtualMachineFilter(CustomFieldFilterSet):
             Q(comments__icontains=value)
         )
 
-    def filter_region(self, queryset, name, value):
-        try:
-            region = Region.objects.get(**{name: value})
-        except ObjectDoesNotExist:
-            return queryset.none()
-        return queryset.filter(
-            Q(cluster__site__region=region) |
-            Q(cluster__site__region__in=region.get_descendants())
-        )
 
-
-class InterfaceFilter(django_filters.FilterSet):
+class InterfaceFilterSet(BaseFilterSet):
+    q = django_filters.CharFilter(
+        method='search',
+        label='Search',
+    )
     virtual_machine_id = django_filters.ModelMultipleChoiceFilter(
         field_name='virtual_machine',
         queryset=VirtualMachine.objects.all(),
@@ -207,21 +217,18 @@ class InterfaceFilter(django_filters.FilterSet):
         to_field_name='name',
         label='Virtual machine',
     )
-    mac_address = django_filters.CharFilter(
-        method='_mac_address',
+    mac_address = MultiValueMACAddressFilter(
         label='MAC address',
     )
+    tag = TagFilter()
 
     class Meta:
         model = Interface
-        fields = ['name', 'enabled', 'mtu']
+        fields = ['id', 'name', 'enabled', 'mtu']
 
-    def _mac_address(self, queryset, name, value):
-        value = value.strip()
-        if not value:
+    def search(self, queryset, name, value):
+        if not value.strip():
             return queryset
-        try:
-            mac = EUI(value.strip())
-            return queryset.filter(mac_address=mac)
-        except AddrFormatError:
-            return queryset.none()
+        return queryset.filter(
+            Q(name__icontains=value)
+        )

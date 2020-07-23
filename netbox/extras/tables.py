@@ -1,11 +1,13 @@
 import django_tables2 as tables
 from django_tables2.utils import Accessor
-from taggit.models import Tag, TaggedItem
 
-from utilities.tables import BaseTable, BooleanColumn, ToggleColumn
-from .models import ConfigContext, ObjectChange
+from utilities.tables import BaseTable, BooleanColumn, ColorColumn, ToggleColumn
+from .models import ConfigContext, ObjectChange, Tag, TaggedItem
 
 TAG_ACTIONS = """
+<a href="{% url 'extras:tag_changelog' slug=record.slug %}" class="btn btn-default btn-xs" title="Change log">
+    <i class="fa fa-history"></i>
+</a>
 {% if perms.taggit.change_tag %}
     <a href="{% url 'extras:tag_edit' slug=record.slug %}" class="btn btn-xs btn-warning"><i class="glyphicon glyphicon-pencil" aria-hidden="true"></i></a>
 {% endif %}
@@ -36,11 +38,11 @@ OBJECTCHANGE_TIME = """
 """
 
 OBJECTCHANGE_ACTION = """
-{% if record.action == 1 %}
+{% if record.action == 'create' %}
     <span class="label label-success">Created</span>
-{% elif record.action == 2 %}
+{% elif record.action == 'update' %}
     <span class="label label-primary">Updated</span>
-{% elif record.action == 3 %}
+{% elif record.action == 'delete' %}
     <span class="label label-danger">Deleted</span>
 {% endif %}
 """
@@ -68,13 +70,14 @@ class TagTable(BaseTable):
     )
     actions = tables.TemplateColumn(
         template_code=TAG_ACTIONS,
-        attrs={'td': {'class': 'text-right'}},
+        attrs={'td': {'class': 'text-right noprint'}},
         verbose_name=''
     )
+    color = ColorColumn()
 
     class Meta(BaseTable.Meta):
         model = Tag
-        fields = ('pk', 'name', 'items', 'slug', 'actions')
+        fields = ('pk', 'name', 'items', 'slug', 'color', 'description', 'actions')
 
 
 class TaggedItemTable(BaseTable):
@@ -101,7 +104,11 @@ class ConfigContextTable(BaseTable):
 
     class Meta(BaseTable.Meta):
         model = ConfigContext
-        fields = ('pk', 'name', 'weight', 'is_active', 'description')
+        fields = (
+            'pk', 'name', 'weight', 'is_active', 'description', 'regions', 'sites', 'roles', 'platforms',
+            'cluster_groups', 'clusters', 'tenant_groups', 'tenants',
+        )
+        default_columns = ('pk', 'name', 'weight', 'is_active', 'description')
 
 
 class ObjectChangeTable(BaseTable):

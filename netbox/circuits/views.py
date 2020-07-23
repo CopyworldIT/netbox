@@ -1,18 +1,21 @@
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import permission_required
 from django.contrib.auth.mixins import PermissionRequiredMixin
 from django.db import transaction
-from django.db.models import Count
+from django.db.models import Count, OuterRef, Subquery
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.generic import View
+from django_tables2 import RequestConfig
 
-from extras.models import Graph, GRAPH_TYPE_PROVIDER
+from extras.models import Graph
 from utilities.forms import ConfirmationForm
+from utilities.paginator import EnhancedPaginator
 from utilities.views import (
     BulkDeleteView, BulkEditView, BulkImportView, ObjectDeleteView, ObjectEditView, ObjectListView,
 )
 from . import filters, forms, tables
-from .constants import TERM_SIDE_A, TERM_SIDE_Z
+from .choices import CircuitTerminationSideChoices
 from .models import Circuit, CircuitTermination, CircuitType, Provider
 
 
@@ -20,29 +23,39 @@ from .models import Circuit, CircuitTermination, CircuitType, Provider
 # Providers
 #
 
-class ProviderListView(ObjectListView):
+class ProviderListView(PermissionRequiredMixin, ObjectListView):
+    permission_required = 'circuits.view_provider'
     queryset = Provider.objects.annotate(count_circuits=Count('circuits'))
-    filter = filters.ProviderFilter
-    filter_form = forms.ProviderFilterForm
-    table = tables.ProviderDetailTable
-    template_name = 'circuits/provider_list.html'
+    filterset = filters.ProviderFilterSet
+    filterset_form = forms.ProviderFilterForm
+    table = tables.ProviderTable
 
 
-class ProviderView(View):
+class ProviderView(PermissionRequiredMixin, View):
+    permission_required = 'circuits.view_provider'
 
     def get(self, request, slug):
 
         provider = get_object_or_404(Provider, slug=slug)
-        circuits = Circuit.objects.filter(provider=provider).select_related(
-            'type', 'tenant'
+        circuits = Circuit.objects.filter(
+            provider=provider
         ).prefetch_related(
-            'terminations__site'
-        )
-        show_graphs = Graph.objects.filter(type=GRAPH_TYPE_PROVIDER).exists()
+            'type', 'tenant', 'terminations__site'
+        ).annotate_sites()
+        show_graphs = Graph.objects.filter(type__model='provider').exists()
+
+        circuits_table = tables.CircuitTable(circuits)
+        circuits_table.columns.hide('provider')
+
+        paginate = {
+            'paginator_class': EnhancedPaginator,
+            'per_page': request.GET.get('per_page', settings.PAGINATE_COUNT)
+        }
+        RequestConfig(request, paginate).configure(circuits_table)
 
         return render(request, 'circuits/provider.html', {
             'provider': provider,
-            'circuits': circuits,
+            'circuits_table': circuits_table,
             'show_graphs': show_graphs,
         })
 
@@ -74,8 +87,8 @@ class ProviderBulkImportView(PermissionRequiredMixin, BulkImportView):
 
 class ProviderBulkEditView(PermissionRequiredMixin, BulkEditView):
     permission_required = 'circuits.change_provider'
-    queryset = Provider.objects.all()
-    filter = filters.ProviderFilter
+    queryset = Provider.objects.annotate(count_circuits=Count('circuits'))
+    filterset = filters.ProviderFilterSet
     table = tables.ProviderTable
     form = forms.ProviderBulkEditForm
     default_return_url = 'circuits:provider_list'
@@ -83,8 +96,8 @@ class ProviderBulkEditView(PermissionRequiredMixin, BulkEditView):
 
 class ProviderBulkDeleteView(PermissionRequiredMixin, BulkDeleteView):
     permission_required = 'circuits.delete_provider'
-    queryset = Provider.objects.all()
-    filter = filters.ProviderFilter
+    queryset = Provider.objects.annotate(count_circuits=Count('circuits'))
+    filterset = filters.ProviderFilterSet
     table = tables.ProviderTable
     default_return_url = 'circuits:provider_list'
 
@@ -93,10 +106,10 @@ class ProviderBulkDeleteView(PermissionRequiredMixin, BulkDeleteView):
 # Circuit Types
 #
 
-class CircuitTypeListView(ObjectListView):
+class CircuitTypeListView(PermissionRequiredMixin, ObjectListView):
+    permission_required = 'circuits.view_circuittype'
     queryset = CircuitType.objects.annotate(circuit_count=Count('circuits'))
     table = tables.CircuitTypeTable
-    template_name = 'circuits/circuittype_list.html'
 
 
 class CircuitTypeCreateView(PermissionRequiredMixin, ObjectEditView):
@@ -128,32 +141,32 @@ class CircuitTypeBulkDeleteView(PermissionRequiredMixin, BulkDeleteView):
 # Circuits
 #
 
-class CircuitListView(ObjectListView):
-    queryset = Circuit.objects.select_related(
-        'provider', 'type', 'tenant'
-    ).prefetch_related(
-        'terminations__site'
-    )
-    filter = filters.CircuitFilter
-    filter_form = forms.CircuitFilterForm
+class CircuitListView(PermissionRequiredMixin, ObjectListView):
+    permission_required = 'circuits.view_circuit'
+    _terminations = CircuitTermination.objects.filter(circuit=OuterRef('pk'))
+    queryset = Circuit.objects.prefetch_related(
+        'provider', 'type', 'tenant', 'terminations__site'
+    ).annotate_sites()
+    filterset = filters.CircuitFilterSet
+    filterset_form = forms.CircuitFilterForm
     table = tables.CircuitTable
-    template_name = 'circuits/circuit_list.html'
 
 
-class CircuitView(View):
+class CircuitView(PermissionRequiredMixin, View):
+    permission_required = 'circuits.view_circuit'
 
     def get(self, request, pk):
 
-        circuit = get_object_or_404(Circuit.objects.select_related('provider', 'type', 'tenant__group'), pk=pk)
-        termination_a = CircuitTermination.objects.select_related(
+        circuit = get_object_or_404(Circuit.objects.prefetch_related('provider', 'type', 'tenant__group'), pk=pk)
+        termination_a = CircuitTermination.objects.prefetch_related(
             'site__region', 'connected_endpoint__device'
         ).filter(
-            circuit=circuit, term_side=TERM_SIDE_A
+            circuit=circuit, term_side=CircuitTerminationSideChoices.SIDE_A
         ).first()
-        termination_z = CircuitTermination.objects.select_related(
+        termination_z = CircuitTermination.objects.prefetch_related(
             'site__region', 'connected_endpoint__device'
         ).filter(
-            circuit=circuit, term_side=TERM_SIDE_Z
+            circuit=circuit, term_side=CircuitTerminationSideChoices.SIDE_Z
         ).first()
 
         return render(request, 'circuits/circuit.html', {
@@ -190,8 +203,8 @@ class CircuitBulkImportView(PermissionRequiredMixin, BulkImportView):
 
 class CircuitBulkEditView(PermissionRequiredMixin, BulkEditView):
     permission_required = 'circuits.change_circuit'
-    queryset = Circuit.objects.select_related('provider', 'type', 'tenant').prefetch_related('terminations__site')
-    filter = filters.CircuitFilter
+    queryset = Circuit.objects.prefetch_related('provider', 'type', 'tenant').prefetch_related('terminations__site')
+    filterset = filters.CircuitFilterSet
     table = tables.CircuitTable
     form = forms.CircuitBulkEditForm
     default_return_url = 'circuits:circuit_list'
@@ -199,8 +212,8 @@ class CircuitBulkEditView(PermissionRequiredMixin, BulkEditView):
 
 class CircuitBulkDeleteView(PermissionRequiredMixin, BulkDeleteView):
     permission_required = 'circuits.delete_circuit'
-    queryset = Circuit.objects.select_related('provider', 'type', 'tenant').prefetch_related('terminations__site')
-    filter = filters.CircuitFilter
+    queryset = Circuit.objects.prefetch_related('provider', 'type', 'tenant').prefetch_related('terminations__site')
+    filterset = filters.CircuitFilterSet
     table = tables.CircuitTable
     default_return_url = 'circuits:circuit_list'
 
@@ -209,8 +222,12 @@ class CircuitBulkDeleteView(PermissionRequiredMixin, BulkDeleteView):
 def circuit_terminations_swap(request, pk):
 
     circuit = get_object_or_404(Circuit, pk=pk)
-    termination_a = CircuitTermination.objects.filter(circuit=circuit, term_side=TERM_SIDE_A).first()
-    termination_z = CircuitTermination.objects.filter(circuit=circuit, term_side=TERM_SIDE_Z).first()
+    termination_a = CircuitTermination.objects.filter(
+        circuit=circuit, term_side=CircuitTerminationSideChoices.SIDE_A
+    ).first()
+    termination_z = CircuitTermination.objects.filter(
+        circuit=circuit, term_side=CircuitTerminationSideChoices.SIDE_Z
+    ).first()
     if not termination_a and not termination_z:
         messages.error(request, "No terminations have been defined for circuit {}.".format(circuit))
         return redirect('circuits:circuit', pk=circuit.pk)
